@@ -191,10 +191,6 @@ impl MemoryNode {
 
         let ptr = ptr as *mut u8;
 
-        unsafe {
-            // Initialize the shared memory region to zero
-            std::ptr::write_bytes(ptr, 0, size); // 1 MiB
-        }
 
         MemoryNode {
             id,
@@ -355,6 +351,7 @@ impl RepCXL {
     }
 
     pub fn dump_states(&mut self) {
+        println!("#### state dump ####");
         for node in &self.memory_nodes {
             unsafe {
                 let state = std::ptr::read(node.state_addr);
@@ -421,13 +418,16 @@ impl RepCXL {
     /// and then in the shared state.
     pub fn get_object(&mut self, id: usize) -> Option<&RepCXLObject> {
         if self.objects.contains_key(&id) {
+            println!("object found in repcxl local cache");
             return self.objects.get(&id);
         }
 
-        println!("Object with id {} not found in cache", id);
+        println!("Object with id {} not found in cache, looking in shared state", id);
 
         let state = self.read_state_from_any().unwrap();
+        
         if let Some(oe) = state.lookup_object(id) {
+            println!("object found in shared state");
             let mut addresses = HashMap::new();
             for node in &self.memory_nodes {
                 let addr = node.addr_at(oe.offset);
