@@ -16,6 +16,9 @@ fn main() {
     rcxl.get_object(100).expect("failed to create object");
     // should find object in cache
     rcxl.get_object(100).expect("failed to create object");
-
+    // should not find this one (succesfully deleted)
+    if rcxl.get_object(4).is_none() {
+        println!("no object found)");
+    }
     rcxl.dump_states();
 }

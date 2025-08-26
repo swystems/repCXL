@@ -16,5 +16,7 @@ fn main() {
     rcxl.new_object::<[u16; 100]>(100)
         .expect("failed to create object");
 
+    rcxl.new_object::<u64>(4);
+    rcxl.remove_object(4);
     rcxl.dump_states();
 }
