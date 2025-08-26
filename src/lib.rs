@@ -2,10 +2,13 @@
 /// WARNING: currently assumes same memory layout and alignment across
 /// all machines.
 use libc::{c_int, c_void, mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
+use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::os::unix::io::AsRawFd;
+use std::time::Duration;
 
+const MAX_PROCESSES: usize = 128; // Maximum number of processes
 const MAX_OBJECTS: usize = 32; // Maximum number of objects
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 
@@ -13,6 +16,13 @@ const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 extern "C" {
     pub fn numa_alloc_onnode(size: usize, node: c_int) -> *mut c_void;
     pub fn numa_free(mem: *mut c_void, size: usize);
+}
+
+/// Returns the system time in Duration since UNIX EPOCH
+fn systime() -> Duration {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Instant before UNIX EPOCH!")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,36 +37,34 @@ impl ObjectEntry {
         ObjectEntry { id, offset, size }
     }
 }
-/// Shared replicated state across memory nodes.
+
+/// Shared fixed-size array indexed by process ID
+#[derive(Debug, Clone, Copy)]
+struct StartingBlock {
+    start_time: Duration,
+    ready_processes: [bool; MAX_PROCESSES],
+}
+
+/// Memory allocation information. Process coordinator has write acess
+/// while replicas have read-only access.
+///
+/// @TODO: add coordinator-only write checks
 #[derive(Copy, Clone, Debug)]
-struct SharedState {
+struct AllocationInfo {
     total_size: usize,
     allocated_size: usize,
     chunk_size: usize,
-    lock: bool, // Mutex for exclusive write
     object_index: [Option<ObjectEntry>; MAX_OBJECTS],
 }
 
-impl SharedState {
+impl AllocationInfo {
     fn new(total_size: usize, chunk_size: usize) -> Self {
-        SharedState {
+        AllocationInfo {
             total_size,
             allocated_size: 0,
             chunk_size,
-            lock: false,                       // not used yet
             object_index: [None; MAX_OBJECTS], // Initialize with None
         }
-    }
-
-    fn lock(&mut self) {
-        while self.lock {
-            // Busy wait until the lock is released
-        }
-        self.lock = true; // Acquire the lock
-    }
-
-    fn unlock(&mut self) {
-        self.lock = false; // Release the lock
     }
 
     /// Get the object entry in from the index by its id.
@@ -87,12 +95,12 @@ impl SharedState {
         let size = chunks * self.chunk_size;
 
         if self.allocated_size + size > self.total_size {
-            println!("Not enough space");
+            warn!("Not enough space");
             return None;
         }
 
         if self.lookup_object(id).is_some() {
-            println!("Object with id {} already exists", id);
+            info!("Object with id {} already exists", id);
             return None;
         }
 
@@ -122,6 +130,7 @@ impl SharedState {
                 }
             }
         }
+        warn!("Failed allocation: no free slot available");
         None
     }
 
@@ -138,6 +147,24 @@ impl SharedState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SharedState {
+    alloc_info: AllocationInfo,
+    starting_block: StartingBlock,
+}
+
+impl SharedState {
+    fn new(total_size: usize, chunk_size: usize) -> Self {
+        SharedState {
+            alloc_info: AllocationInfo::new(total_size, chunk_size),
+            starting_block: StartingBlock {
+                start_time: Duration::from_nanos(0),
+                ready_processes: [false; MAX_PROCESSES],
+            },
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Hash)]
 enum MemoryType {
     Numa,
@@ -148,7 +175,6 @@ enum MemoryType {
 pub struct MemoryNode {
     id: usize,
     type_: MemoryType,
-    // Pointer to the shared state in this memory node (start of the memory region)
     state_addr: *mut SharedState,
     addr: *mut u8,
     size: usize,
@@ -161,7 +187,7 @@ impl MemoryNode {
     // assumes all processes/VMs use the same file path
     fn from_file(id: usize, path: &str, size: usize) -> Self {
         if size <= STATE_SIZE {
-            panic!("Size must be greater than SharedState size");
+            panic!("Size must be greater than AllocationInfo size");
         }
 
         let file = OpenOptions::new()
@@ -190,7 +216,6 @@ impl MemoryNode {
         }
 
         let ptr = ptr as *mut u8;
-
 
         MemoryNode {
             id,
@@ -223,6 +248,22 @@ impl MemoryNode {
             panic!("Offset out of bounds");
         }
         unsafe { self.addr.offset(offset as isize) }
+    }
+
+    // copy of the shared state (which remains unchanged)
+    fn read_state(&self) -> SharedState {
+        unsafe { std::ptr::read(self.state_addr) } // WARNING: might want to read_unaligned
+    }
+
+    // mutable reference to the shared state
+    fn get_state(&self) -> &mut SharedState {
+        unsafe { &mut *self.state_addr }
+    }
+
+    fn write_state(&self, state: SharedState) {
+        unsafe {
+            std::ptr::write(self.state_addr, state); // WARNING: might want to write_unaligned
+        }
     }
 }
 
@@ -295,6 +336,40 @@ mod tests {
     }
 }
 
+/// The current membership of the group. Stores both the
+/// processes and the memory nodes present in the system at a given time.
+struct GroupView {
+    processes: Vec<usize>,
+    memory_nodes: Vec<MemoryNode>,
+}
+
+impl GroupView {
+    fn new() -> Self {
+        GroupView {
+            processes: Vec::new(),
+            memory_nodes: Vec::new(),
+        }
+    }
+
+    fn add_process(&mut self, pid: usize) {
+        if !self.processes.contains(&pid) {
+            self.processes.push(pid);
+        } else {
+            info!("process {} already in group", pid);
+        }
+    }
+
+    // Returns the process with the lowest ID as the coordinator
+    fn get_coordinator(&self) -> Option<usize> {
+        self.processes.iter().min().cloned()
+    }
+
+    // Returns the memory node with the lowest ID as the master node
+    fn get_master_node(&self) -> Option<&MemoryNode> {
+        self.memory_nodes.iter().min_by_key(|n| n.id)
+    }
+}
+
 /// Shared replicated object across memory nodes
 pub struct RepCXLObject {
     pub id: usize,
@@ -302,61 +377,92 @@ pub struct RepCXLObject {
     addresses: HashMap<usize, *mut u8>, // MemoryNode id-> address in that node
 }
 
+/// Main RepCXL structure in local memory/cache for each process
 pub struct RepCXL {
+    pub id: usize,
     pub size: usize,
     chunk_size: usize, // Size of each chunk in bytes
-    memory_nodes: Vec<MemoryNode>,
+    view: GroupView,
     objects: HashMap<usize, RepCXLObject>, // id -> object
 }
 
 impl RepCXL {
-    pub fn new(size: usize, chunk_size: usize) -> Self {
+    pub fn new(id: usize, size: usize, chunk_size: usize) -> Self {
         let chunks = (size + chunk_size - 1) / chunk_size;
         let total_size = chunks * chunk_size;
 
+        let mut view = GroupView::new();
+        if id >= MAX_PROCESSES {
+            panic!("Process ID must be between 0 and {}", MAX_PROCESSES - 1);
+        }
+        view.processes.push(id); // add self to group
+
         RepCXL {
+            id,
             size: total_size,
             chunk_size,
-            memory_nodes: Vec::new(),
+            view,
             objects: HashMap::new(),
         }
     }
 
-    pub fn add_memory_node_from_file(&mut self, path: &str) {
-        let id = self.memory_nodes.len();
-        let node = MemoryNode::from_file(id, path, self.size);
+    pub fn add_process_to_group(&mut self, pid: usize) {
+        self.view.add_process(pid);
+    }
 
-        self.memory_nodes.push(node);
+    pub fn add_memory_node_from_file(&mut self, path: &str) {
+        let id = self.view.memory_nodes.len();
+        let node = MemoryNode::from_file(id, path, self.size);
+        self.view.memory_nodes.push(node);
     }
 
     pub fn init_state(&mut self) {
         let state = SharedState::new(self.size, self.chunk_size);
 
         // Write the shared state to each memory node
-        for node in &self.memory_nodes {
-            unsafe {
-                std::ptr::write(node.state_addr, state); // WARNING: might want to write_unaligned
-            }
+        for node in &self.view.memory_nodes {
+            node.write_state(state);
         }
     }
 
     fn read_state_from_any(&self) -> Result<SharedState, &str> {
-        for node in &self.memory_nodes {
-            unsafe {
-                let state = std::ptr::read(node.state_addr);
-                return Ok(state);
-            }
+        for node in &self.view.memory_nodes {
+            let state = node.read_state();
+            return Ok(state);
         }
         Err("Could not read state from any memory node!")
     }
 
+    // fn read_state_from_master(&self) -> Result<SharedState, &str> {
+    //     if let Some(master) = self.view.get_master_node() {
+    //         master.read_state();
+    //         return Ok(master.read_state());
+    //     }
+    //     Err("Could not read state from master node!")
+    // }
+
+    // fn write_state_to_master(&self, state: SharedState) {
+    //     if let Some(master) = self.view.get_master_node() {
+    //         master.write_state(state);
+    //     } else {
+    //         error!("Could not write state to master node!");
+    //     }
+    // }
+
+    // Get a mutable reference to the starting block from the master node
+    fn get_starting_block(&self) -> Result<&mut StartingBlock, &str> {
+        if let Some(master) = self.view.get_master_node() {
+            let state = master.get_state();
+            return Ok(&mut state.starting_block);
+        }
+        Err("Could not read starting block from master node!")
+    }
+
     pub fn dump_states(&mut self) {
         println!("#### state dump ####");
-        for node in &self.memory_nodes {
-            unsafe {
-                let state = std::ptr::read(node.state_addr);
-                println!("Memory node {}:\n{:?}", node.id, state);
-            }
+        for node in &self.view.memory_nodes {
+            let state = node.read_state();
+            println!("Memory node {}:\n{:?}", node.id, state);
         }
     }
 
@@ -371,21 +477,19 @@ impl RepCXL {
 
         let mut state = self.read_state_from_any().unwrap();
 
-        match state.alloc_object(id, size) {
+        match state.alloc_info.alloc_object(id, size) {
             Some(offset) => {
                 // Allocate memory in each memory node
-                for node in &self.memory_nodes {
+                for node in &self.view.memory_nodes {
                     let addr = node.addr_at(offset);
                     addresses.insert(node.id, addr);
 
                     // write state to every memory node
-                    unsafe {
-                        std::ptr::write(node.state_addr, state);
-                    }
+                    node.write_state(state);
                 }
             }
             None => {
-                println!("Failed to allocate object with id {} of size {}", id, size);
+                info!("Failed to allocate object with id {} of size {}", id, size);
                 return None;
             }
         }
@@ -404,13 +508,11 @@ impl RepCXL {
 
     pub fn remove_object(&mut self, id: usize) {
         let mut state = self.read_state_from_any().unwrap();
-        state.dealloc_object(id);
+        state.alloc_info.dealloc_object(id);
 
         // Update the shared state in each memory node
-        for node in &mut self.memory_nodes {
-            unsafe {
-                std::ptr::write(node.state_addr, state);
-            }
+        for node in &mut self.view.memory_nodes {
+            node.write_state(state);
         }
     }
 
@@ -418,18 +520,21 @@ impl RepCXL {
     /// and then in the shared state.
     pub fn get_object(&mut self, id: usize) -> Option<&RepCXLObject> {
         if self.objects.contains_key(&id) {
-            println!("object found in repcxl local cache");
+            debug!("object found in repcxl local cache");
             return self.objects.get(&id);
         }
 
-        println!("Object with id {} not found in cache, looking in shared state", id);
+        info!(
+            "Object with id {} not found in cache, looking in shared state",
+            id
+        );
 
         let state = self.read_state_from_any().unwrap();
-        
-        if let Some(oe) = state.lookup_object(id) {
-            println!("object found in shared state");
+
+        if let Some(oe) = state.alloc_info.lookup_object(id) {
+            info!("Object found in shared state");
             let mut addresses = HashMap::new();
-            for node in &self.memory_nodes {
+            for node in &self.view.memory_nodes {
                 let addr = node.addr_at(oe.offset);
                 addresses.insert(node.id, addr);
             }
@@ -446,5 +551,50 @@ impl RepCXL {
             return self.objects.get(&id);
         }
         None
+    }
+
+    /// Synchronize processes in the group and start repCXL rounds.
+    /// **assumes sync'ed clocks**
+    /// All processes must call this function with the same group view to
+    /// ensure consistency.
+    pub fn sync_start(&self) {
+        if let Some(coord) = self.view.get_coordinator() {
+            let sblock = self.get_starting_block().unwrap();
+
+            // mark self as ready
+            sblock.ready_processes[self.id] = true;
+            info!("Process {} marked as ready.", self.id);
+
+            loop {
+                if coord == self.id {
+                    // info!("Process {} is the coordinator", self.id);
+
+                    // check if all processes are ready
+                    if self
+                        .view
+                        .processes
+                        .iter()
+                        .all(|&pid| sblock.ready_processes[pid])
+                    {
+                        let start_time = systime() + Duration::from_secs(2);
+                        sblock.start_time = start_time;
+                        info!("Rounds starting at {:?}", start_time);
+                        break;
+                    }
+                    // break; //temp
+                } else if sblock.start_time != Duration::from_nanos(0) {
+                    info!(
+                        "Process {} sees round starting time set to {:?}",
+                        self.id, sblock.start_time
+                    );
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                debug!("Process {} waiting for start...", self.id);
+            }
+        } else {
+            error!("FATAL: No coordinator found in group");
+            return;
+        }
     }
 }

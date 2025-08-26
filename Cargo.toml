@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 clap = "4.5.44"
 libc = "0.2.175"
+log = "0.4.27"
+simple_logger = "5.0.0"

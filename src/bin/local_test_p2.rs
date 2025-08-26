@@ -1,10 +1,16 @@
 use rep_cxl::RepCXL;
+// use simple_logger::SimpleLogger;
 use std::fs::OpenOptions;
 
+const ID: usize = 2;
 const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const NODES: usize = 3;
 fn main() {
+    // Initialize the logger
+    simple_logger::init().unwrap();
+    // simple_logger::init_with_env().unwrap();
+
     // create memory nodes as files in tmpfs
     for i in 0..NODES {
         let path = format!("/dev/shm/repCXL_test{}", i);
@@ -19,32 +25,29 @@ fn main() {
             .expect("Failed to set file length");
     }
 
-    let mut rcxl = RepCXL::new(MEMORY_SIZE, CHUNK_SIZE);
+    let mut rcxl = RepCXL::new(ID, MEMORY_SIZE, CHUNK_SIZE);
 
     println!("mem: {}", rcxl.size);
     for i in 0..NODES {
         rcxl.add_memory_node_from_file(&format!("/dev/shm/repCXL_test{}", i));
     }
 
-    rcxl.init_state();
+    // add process 1
+    rcxl.add_process_to_group(1);
 
-    rcxl.new_object::<[u16; 100]>(100)
-        .expect("failed to create object");
+    rcxl.get_object(100).expect("failed to create object");
 
-    rcxl.new_object::<String>(100);
-
+    // should fail
     rcxl.new_object::<String>(66);
+    // should succeed
+    rcxl.remove_object(66);
 
-    // {
-    //     let obj67 = rcxl.new_object::<String>(67).unwrap();
-
-    //     obj67.write("Hello, world!");
-    // }
-    // when it goes out of scope, it should be deleted?
-    // nope, some other processes might still use it
-
-    // rcxl.remove_object::<String>(66);
     // rcxl.remove_object::<String>(100);
 
+    rcxl.sync_start();
+
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
     rcxl.dump_states();
+    rcxl.remove_object(66);
 }
