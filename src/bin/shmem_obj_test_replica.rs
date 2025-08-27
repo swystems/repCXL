@@ -5,9 +5,15 @@ const ID: usize = 2;
 const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const SHMEM_PATH: &str = "/sys/bus/pci/devices/0000:00:03.0/resource2";
+const ROUND_INTERVAL_NS: u64 = 1_000_000; // 1 ms
 
 fn main() {
-    let mut rcxl = RepCXL::new(ID, MEMORY_SIZE, CHUNK_SIZE);
+    let mut rcxl = RepCXL::<u64>::new(
+        ID,
+        MEMORY_SIZE,
+        CHUNK_SIZE,
+        std::time::Duration::from_nanos(ROUND_INTERVAL_NS),
+    );
     println!("mem: {}", rcxl.size);
 
     rcxl.add_memory_node_from_file(SHMEM_PATH);

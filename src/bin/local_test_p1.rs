@@ -6,6 +6,7 @@ const ID: usize = 1;
 const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const NODES: usize = 3;
+const ROUND_INTERVAL_NS: u64 = 1_000_000; // 1 ms
 fn main() {
     // Initialize the logger
     simple_logger::init().unwrap();
@@ -25,7 +26,12 @@ fn main() {
             .expect("Failed to set file length");
     }
 
-    let mut rcxl = RepCXL::new(ID, MEMORY_SIZE, CHUNK_SIZE);
+    let mut rcxl = RepCXL::new(
+        ID,
+        MEMORY_SIZE,
+        CHUNK_SIZE,
+        std::time::Duration::from_nanos(ROUND_INTERVAL_NS),
+    );
 
     println!("mem: {}", rcxl.size);
     for i in 0..NODES {
@@ -33,18 +39,18 @@ fn main() {
     }
 
     // add process 2
-    rcxl.add_process_to_group(2);
+    rcxl.register_process(2);
     // test adding it again
-    rcxl.add_process_to_group(2);
+    rcxl.register_process(2);
 
     rcxl.init_state();
 
-    rcxl.new_object::<[u16; 100]>(100)
-        .expect("failed to create object");
+    // rcxl.new_object::<[u16; 100]>(100)
+    //     .expect("failed to create object");
 
-    rcxl.new_object::<String>(100);
+    // rcxl.new_object::<String>(100);
 
-    rcxl.new_object::<String>(66);
+    // rcxl.new_object::<String>(66);
 
     // rcxl.remove_object::<String>(100);
 
