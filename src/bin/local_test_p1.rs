@@ -26,7 +26,7 @@ fn main() {
             .expect("Failed to set file length");
     }
 
-    let mut rcxl = RepCXL::new(
+    let mut rcxl = RepCXL::<u64>::new(
         ID,
         MEMORY_SIZE,
         CHUNK_SIZE,

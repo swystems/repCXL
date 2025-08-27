@@ -27,7 +27,7 @@ fn main() {
             .expect("Failed to set file length");
     }
 
-    let mut rcxl = RepCXL::new(
+    let mut rcxl = RepCXL::<u64>::new(
         ID,
         MEMORY_SIZE,
         CHUNK_SIZE,
@@ -39,12 +39,12 @@ fn main() {
     }
 
     // add process 1
-    rcxl.add_process(1);
+    rcxl.register_process(1);
 
     rcxl.get_object(100).expect("failed to create object");
 
     // should fail
-    rcxl.new_object::<String>(66);
+    rcxl.new_object(66);
     // should succeed
     rcxl.remove_object(66);
 
