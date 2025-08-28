@@ -4,13 +4,12 @@
 use libc::{c_int, c_void, mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use log::{debug, error, info, warn};
 use std::fs::OpenOptions;
-// use std::marker::Copy;
 use std::os::unix::io::AsRawFd;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
-const MAX_OBJECTS: usize = 32; // Maximum number of objects
+const MAX_OBJECTS: usize = 128; // Maximum number of objects
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 const ROUND_SLEEP_RATIO: f64 = 0.5; // Percentage of round time to sleep before busy-waiting
 
@@ -346,7 +345,7 @@ mod tests {
         let size = 1024; // 1 KiB
         let numa_node = 0; // Node 0 should exist on most systems
 
-        let node = MemoryNode::from_numa(mnid, size, numa_node);
+        let node = MemoryNode::_from_numa(mnid, size, numa_node);
 
         unsafe {
             *node.addr = 31;
@@ -422,31 +421,43 @@ impl<T> RepCXLObject<T> {
         size: usize,
         queue: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
     ) -> Self {
+        let (ack_tx, ack_rx) = mpsc::channel();
         RepCXLObject {
             queue_tx: queue,
-            ack_tx: mpsc::channel().0,
-            ack_rx: mpsc::channel().1,
+            ack_tx,
+            ack_rx,
             info: ObjectInfo::new(id, offset, size),
         }
     }
 
-    pub fn write(&self, data: T) -> Result<(), &str> {
+    pub fn write(&self, data: T) -> Result<(), String> {
         // check size matches
-        if std::mem::size_of_val(&data) != self.info.size {
-            return Err("Data size does not match object size");
-        }
+        // currently broken because non coordinatoor will read the chunk size of T
+        // from the shared state, which is likely more than the actual size of T
+        // @TODO: fix
+        // if std::mem::size_of_val(&data) != self.info.size {
+        //     debug!(
+        //         "data size: {}, object size: {}",
+        //         std::mem::size_of_val(&data),
+        //         self.info.size
+        //     );
+        //     return Err("Data size does not match object size");
+        // }
+
         // enqueue to coordination thread
         // @TODO: might be expensive to send the channel every time, consider storing the
         // objects in the shmuc_thread
+
         self.queue_tx
             .send((self.info.offset, data, self.ack_tx.clone()))
-            .map_err(|_| "Failed to send object info to coord. thread")?;
+            .map_err(|e| format!("Failed to send to object queue: {}", e))?;
 
+        // std::thread::sleep(Duration::from_millis(10));
         // wait for ack
         match self.ack_rx.recv() {
             Ok(true) => Ok(()),
-            Ok(false) => Err("Failed write operation"),
-            Err(_) => Err("Failed to receive ack"),
+            Ok(false) => Err("Failed write operation".into()),
+            Err(e) => Err(format!("Failed to receive ack: {}", e)),
         }
     }
 }
@@ -457,11 +468,12 @@ pub struct RepCXL<T> {
     pub id: usize,
     pub size: usize,
     chunk_size: usize, // Size of each chunk in bytes
+    num_of_objects: usize,
     view: GroupView,
     // objects: HashMap<usize, RepCXLObject>, // id -> object
     round_time: Duration,
     obj_queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
-    // obj_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
+    obj_queue_rx: Option<mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -476,17 +488,18 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         view.processes.push(id); // add self to group
 
         // dummy channel for init
-        let (_tx, _rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
 
         RepCXL {
             id,
             size: total_size,
             chunk_size,
+            num_of_objects: 0,
             view,
             // objects: HashMap::new(),
             round_time,
-            obj_queue_tx: _tx,
-            // obj_queue_rx: rx,
+            obj_queue_tx: tx,
+            obj_queue_rx: Some(rx),
         }
     }
 
@@ -544,6 +557,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// # Arguments
     /// * `id` - Unique identifier for the object.
     pub fn new_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
+        if self.num_of_objects >= MAX_OBJECTS {
+            warn!("Maximum number of objects reached");
+            return None;
+        }
+
         let size = std::mem::size_of::<T>(); // padded and aligned
 
         let mut state = self.read_state_from_any().unwrap();
@@ -561,6 +579,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 // create the new RepCXLObject
 
                 let obj = RepCXLObject::new(id, offset, size, tx);
+
+                self.num_of_objects += 1;
                 return Some(obj);
             }
             None => {
@@ -643,7 +663,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                         .iter()
                         .all(|&pid| sblock.ready_processes[pid])
                     {
-                        start_time = std::time::SystemTime::now() + Duration::from_secs(2);
+                        start_time = std::time::SystemTime::now() + Duration::from_secs(1);
                         sblock.start_time = Some(start_time);
                         info!("Rounds starting at {:?}", start_time);
 
@@ -667,13 +687,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
             // create object queue channel: move the receiver to the thread
             // and keep the sender in state to assign to new objects
-            let (tx, rx) = mpsc::channel();
-            // assign to self
-            self.obj_queue_tx = tx;
+            // let (tx, rx) = mpsc::channel();
+            let rx = self.obj_queue_rx.take().expect("Receiver already taken");
             std::thread::spawn(move || {
                 // thread logic here
                 shmuc_process(v, start_time, rt, rx);
             });
+
+            // block until start time
+            std::thread::sleep(Duration::from_secs(2));
         } else {
             error!("FATAL: No coordinator found in group");
             return;
@@ -718,6 +740,7 @@ fn shmuc_process<T: Copy + PartialEq + std::fmt::Debug>(
                         );
                         success = false;
                     }
+                    info!("successfully wrote {:?} to node {}", data, node.id);
                 }
 
                 // send ack

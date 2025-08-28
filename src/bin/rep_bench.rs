@@ -11,7 +11,7 @@ const NODE_PATHS: [&str; 3] = [
     "/dev/shm/repCXL_test1",
     "/dev/shm/repCXL_test2",
 ];
-const COMPUTE_NODES: u32 = 2;
+const COMPUTE_NODES: u32 = 1;
 const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
@@ -92,13 +92,16 @@ fn main() {
 
     let round_time = std::time::Duration::from_nanos(round_time_ns);
 
+    let mut client_handles = Vec::new();
     let total_processes = clients * COMPUTE_NODES;
     for c in 0..clients {
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             // assign incremental ids depending on the node
             // assumes that all COMPUTE_NODES have the same number of clients
             let rcxl_id = node_id * clients + c;
-            let mut rcxl = RepCXL::new(rcxl_id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
+            debug!("Starting RepCXL instance with id {}", rcxl_id);
+            let mut rcxl =
+                RepCXL::<u64>::new(rcxl_id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
 
             // open memory COMPUTE_NODES
             for path in NODE_PATHS.iter() {
@@ -117,6 +120,7 @@ fn main() {
                 rcxl.init_state();
 
                 for i in 0..num_of_objects {
+                    debug!("Creating object {}", i);
                     let obj = rcxl.new_object(i).expect("failed to create object");
                     objects.push(obj);
                 }
@@ -137,7 +141,7 @@ fn main() {
                 }
             }
 
-            rcxl.dump_states();
+            // rcxl.dump_states();
 
             rcxl.sync_start();
 
@@ -186,6 +190,11 @@ fn main() {
                 percentile(&lats_ns, 0.9999)
             );
             println!("Latency Max: {:?}", mem_max);
-        });
+        }); // end of thread body
+        client_handles.push(handle);
+    }
+
+    for handle in client_handles {
+        handle.join().unwrap();
     }
 }
