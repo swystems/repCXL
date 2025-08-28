@@ -721,7 +721,7 @@ fn shmuc_process<T: Copy + PartialEq + std::fmt::Debug>(
             SystemTime::now().duration_since(next_round).unwrap()
         );
 
-        match obj_queue_rx.recv() {
+        match obj_queue_rx.try_recv() {
             Ok((offset, data, ack_tx)) => {
                 // write data to all memory nodes
                 let mut success = true;
@@ -740,7 +740,7 @@ fn shmuc_process<T: Copy + PartialEq + std::fmt::Debug>(
                         );
                         success = false;
                     }
-                    info!("successfully wrote {:?} to node {}", data, node.id);
+                    debug!("Successfully wrote {:?} to node {}", data, node.id);
                 }
 
                 // send ack
@@ -749,8 +749,13 @@ fn shmuc_process<T: Copy + PartialEq + std::fmt::Debug>(
                 }
             }
             Err(e) => {
-                warn!("Object queue channel closed: {}", e);
-                break; // exit thread
+                match e {
+                    mpsc::TryRecvError::Empty => (),
+                    mpsc::TryRecvError::Disconnected => {
+                        warn!("Object queue channel closed: {}", e);
+                        break; // exit thread
+                    }
+                }
             }
         }
 

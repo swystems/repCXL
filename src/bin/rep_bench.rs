@@ -1,9 +1,10 @@
 // evaluate raw replication performance
-use clap::{value_parser, Arg};
+use clap::{error, value_parser, Arg};
 use log::{debug, error};
 use rand::Rng;
 use rep_cxl::RepCXL;
 use simple_logger;
+use std::time::{Duration, Instant};
 
 // CONFIG
 const NODE_PATHS: [&str; 3] = [
@@ -11,7 +12,6 @@ const NODE_PATHS: [&str; 3] = [
     "/dev/shm/repCXL_test1",
     "/dev/shm/repCXL_test2",
 ];
-const COMPUTE_NODES: u32 = 1;
 const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
@@ -20,6 +20,7 @@ const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
 const DEFAULT_ATTEMPTS: &str = "1000";
 const DEFAULT_CLIENTS: &str = "2";
 const DEFAULT_OBJECTS: &str = "100";
+const DEFAULT_COMPUTE_NODES: &str = "2";
 
 pub fn percentile(latencies: &Vec<u128>, p: f32) -> u128 {
     if latencies.is_empty() {
@@ -56,17 +57,25 @@ fn main() {
         )
         .arg(
             Arg::new("node_id")
-                .short('n')
+                .short('i')
                 .long("node_id")
                 .help("Unique identifier for the node/machine")
                 .required(true)
-                .value_parser(value_parser!(u32).range(0..COMPUTE_NODES as i64)),
+                .value_parser(value_parser!(u32)),
         )
         .arg(
-            Arg::new("clients")
-                .short('c')
-                .long("clients")
-                .help("Number of clients (rep_cxl instances issuing requests) for the current node. Must be the same for all COMPUTE_NODES")
+            Arg::new("nodes")
+                .short('n')
+                .long("nodes")
+                .help("Number of total compute nodes")
+                .default_value(DEFAULT_COMPUTE_NODES)
+                .value_parser(value_parser!(u32)),
+        )
+        .arg(
+            Arg::new("threads")
+                .short('t')
+                .long("threads")
+                .help("Number of threads (rep_cxl instances issuing requests) for the current node. Must be the same for all COMPUTE_NODES")
                 .default_value(DEFAULT_CLIENTS)
                 .value_parser(value_parser!(u32)),
         )
@@ -84,21 +93,33 @@ fn main() {
     let round_time_ns = matches.get_one::<u64>("round_time").unwrap().clone();
 
     let node_id = matches.get_one::<u32>("node_id").unwrap().clone();
+    let nodes = matches.get_one::<u32>("nodes").unwrap().clone();
+    if node_id >= nodes {
+        error!("node_id must be less than nodes");
+        error!("node_id: {node_id}, nodes: {nodes}");
+        std::process::exit(1);
+    }
+
     let attempts = matches.get_one::<u32>("attempts").unwrap().clone();
-    let clients = matches.get_one::<u32>("clients").unwrap().clone();
+    let threads = matches.get_one::<u32>("threads").unwrap().clone();
     let num_of_objects = matches.get_one::<usize>("objects").unwrap().clone();
 
     // init metrics vectors
 
-    let round_time = std::time::Duration::from_nanos(round_time_ns);
+    let round_time = Duration::from_nanos(round_time_ns);
 
     let mut client_handles = Vec::new();
-    let total_processes = clients * COMPUTE_NODES;
-    for c in 0..clients {
+    let total_processes = threads * nodes;
+
+    let (lats_tx, lats_rx) = std::sync::mpsc::channel();
+    let (tput_tx, tput_rx) = std::sync::mpsc::channel();
+    for c in 0..threads {
+        let lats_tx = lats_tx.clone();
+        let tput_tx = tput_tx.clone();
         let handle = std::thread::spawn(move || {
             // assign incremental ids depending on the node
-            // assumes that all COMPUTE_NODES have the same number of clients
-            let rcxl_id = node_id * clients + c;
+            // assumes that all COMPUTE_NODES have the same number of threads
+            let rcxl_id = node_id * threads + c;
             debug!("Starting RepCXL instance with id {}", rcxl_id);
             let mut rcxl =
                 RepCXL::<u64>::new(rcxl_id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
@@ -134,7 +155,7 @@ fn main() {
                     let obj = loop {
                         match rcxl.get_object(i) {
                             Some(obj) => break obj,
-                            None => std::thread::sleep(std::time::Duration::from_millis(100)),
+                            None => std::thread::sleep(Duration::from_millis(100)),
                         }
                     };
                     objects.push(obj);
@@ -148,12 +169,12 @@ fn main() {
             let mut lats = Vec::new();
             let mut rng = rand::rng();
 
-            let total_start = std::time::Instant::now();
+            let total_start = Instant::now();
             for _ in 0..attempts {
                 let id = rng.random_range(0..num_of_objects);
                 let obj = objects.get(id).unwrap();
 
-                let start = std::time::Instant::now();
+                let start = Instant::now();
                 // write is blocking
                 match obj.write(OBJ_VAL) {
                     Ok(()) => (),
@@ -162,39 +183,61 @@ fn main() {
                 lats.push(start.elapsed());
             }
             let total_elapsed_s = total_start.elapsed().as_secs_f64();
-
-            // print stats
-            println!(
-                "Total time for {attempts} writes with {total_processes} clients: {:.2}",
-                total_elapsed_s
-            );
-            println!(
-                "Throughput: {:.2} ops/sec",
-                attempts as f64 / total_elapsed_s
-            );
-            let lats_ns: Vec<u128> = lats.into_iter().map(|d| d.as_nanos()).collect();
-            let mem_avg = lats_ns.iter().sum::<u128>() as f64 / attempts as f64;
-            let mem_max = lats_ns.iter().max().unwrap();
-            let mem_min = lats_ns.iter().min().unwrap();
-            println!(
-                "Desired sleep duration of {} nanoseconds: {attempts} runs",
-                round_time.as_nanos()
-            );
-            println!("Latency Avg: {:?}", mem_avg);
-            println!("Latency Min: {:?}", mem_min);
-            println!("Latency 50th percentile: {:?}", percentile(&lats_ns, 0.5));
-            println!("Latency 95th percentile: {:?}", percentile(&lats_ns, 0.95));
-            println!("Latency 99th percentile: {:?}", percentile(&lats_ns, 0.99));
-            println!(
-                "Latency 99.99th percentile: {:?}",
-                percentile(&lats_ns, 0.9999)
-            );
-            println!("Latency Max: {:?}", mem_max);
+            lats_tx.send(lats).unwrap();
+            tput_tx.send(attempts as f64 / total_elapsed_s).unwrap();
         }); // end of thread body
         client_handles.push(handle);
+    }
+
+    // collect and print stats (probably dumb way of doing it I know)
+    let mut lats_ns = Vec::new();
+    let mut total_tputs = Vec::new();
+
+    // drop extra senders to make the recv loop exit
+    drop(lats_tx);
+    drop(tput_tx);
+
+    loop {
+        match (lats_rx.recv(), tput_rx.recv()) {
+            (Ok(l), Ok(t)) => {
+                lats_ns.append(&mut l.into_iter().map(|d| d.as_nanos()).collect());
+                total_tputs.push(t);
+            }
+            _ => break,
+        }
     }
 
     for handle in client_handles {
         handle.join().unwrap();
     }
+
+    println!(
+        "Throughput: {:.2} ops/sec",
+        total_tputs.iter().sum::<f64>() / total_tputs.len() as f64
+    );
+    // let lats_ns: Vec<u128> = lats.into_iter().map(|d| d.as_nanos()).collect();
+    let mem_avg = lats_ns.iter().sum::<u128>() as f64 / attempts as f64;
+    let mem_max = lats_ns.iter().max().unwrap();
+    let mem_min = lats_ns.iter().min().unwrap();
+
+    println!("Round time {:?}, {attempts} runs", round_time);
+    println!("Latency Avg: {:?}", Duration::from_nanos(mem_avg as u64));
+    println!("Latency Min: {:?}", Duration::from_nanos(*mem_min as u64));
+    println!(
+        "Latency 50th percentile: {:?}",
+        Duration::from_nanos(percentile(&lats_ns, 0.5) as u64)
+    );
+    println!(
+        "Latency 95th percentile: {:?}",
+        Duration::from_nanos(percentile(&lats_ns, 0.95) as u64)
+    );
+    println!(
+        "Latency 99th percentile: {:?}",
+        Duration::from_nanos(percentile(&lats_ns, 0.99) as u64)
+    );
+    println!(
+        "Latency 99.99th percentile: {:?}",
+        Duration::from_nanos(percentile(&lats_ns, 0.9999) as u64)
+    );
+    println!("Latency Max: {:?}", Duration::from_nanos(*mem_max as u64));
 }
