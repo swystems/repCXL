@@ -253,7 +253,7 @@ impl MemoryNode {
     }
 
     /// WARNING: placeholder only. memory is not shared, every node will its own memory region
-    fn from_numa(id: usize, size: usize, numa_node: i32) -> Self {
+    fn _from_numa(id: usize, size: usize, numa_node: i32) -> Self {
         let ptr = unsafe { numa_alloc_onnode(size, numa_node) };
         if ptr.is_null() {
             panic!("numa_alloc_onnode failed");
@@ -407,6 +407,7 @@ impl GroupView {
 // }
 
 /// Shared replicated object across memory nodes
+#[derive(Debug)]
 pub struct RepCXLObject<T> {
     queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
     ack_tx: mpsc::Sender<bool>,
@@ -463,7 +464,7 @@ pub struct RepCXL<T> {
     // obj_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
 }
 
-impl<T: Send + Copy + 'static> RepCXL<T> {
+impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn new(id: usize, size: usize, chunk_size: usize, round_time: Duration) -> Self {
         let chunks = (size + chunk_size - 1) / chunk_size;
         let total_size = chunks * chunk_size;
@@ -671,7 +672,7 @@ impl<T: Send + Copy + 'static> RepCXL<T> {
             self.obj_queue_tx = tx;
             std::thread::spawn(move || {
                 // thread logic here
-                shmuc_worker(v, start_time, rt, rx);
+                shmuc_process(v, start_time, rt, rx);
             });
         } else {
             error!("FATAL: No coordinator found in group");
@@ -680,7 +681,7 @@ impl<T: Send + Copy + 'static> RepCXL<T> {
     }
 }
 
-fn shmuc_worker<T: Copy>(
+fn shmuc_process<T: Copy + PartialEq + std::fmt::Debug>(
     view: GroupView,
     start_time: SystemTime,
     round_time: Duration,
@@ -701,7 +702,7 @@ fn shmuc_worker<T: Copy>(
         match obj_queue_rx.recv() {
             Ok((offset, data, ack_tx)) => {
                 // write data to all memory nodes
-                let success = true;
+                let mut success = true;
                 for node in &view.memory_nodes {
                     let addr = node.addr_at(offset) as *mut T;
                     unsafe {
@@ -709,15 +710,16 @@ fn shmuc_worker<T: Copy>(
                         // *addr = data;
                     }
                     // verify write
-                    // let read_back = unsafe { std::ptr::read_volatile(addr) };
-                    // if read_back != data {
-                    //     warn!(
-                    //         "Write verification failed on node {}: wrote {:?}, read back {:?}",
-                    //         node.id, data, read_back
-                    //     );
-                    //     success = false;
-                    // }
+                    let read_back = unsafe { std::ptr::read(addr) };
+                    if read_back != data {
+                        warn!(
+                            "Write verification failed on node {}: wrote {:?}, read back {:?}",
+                            node.id, data, read_back
+                        );
+                        success = false;
+                    }
                 }
+
                 // send ack
                 if let Err(e) = ack_tx.send(success) {
                     error!("Failed to send ack: {}", e);
