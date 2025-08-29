@@ -1,3 +1,6 @@
+# vscode
+.vscode/
+
 # rust files
 Cargo.lock
 target/
@@ -13,3 +16,7 @@ bpsleep
 # local testing
 *.iso
 ibmvm.sh
+
+# Added by cargo
+
+/target
