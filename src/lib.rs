@@ -3,12 +3,15 @@
 /// all machines.
 use libc::{c_int, c_void, mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use log::{debug, error, info, warn};
+use std::collections::HashMap;
+use std::fmt::Write;
 use std::fs::OpenOptions;
 use std::os::unix::io::AsRawFd;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
 mod algorithms;
+mod safe_memio;
 
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
 const MAX_OBJECTS: usize = 128; // Maximum number of objects
@@ -142,10 +145,69 @@ impl AllocationInfo {
     }
 }
 
+// @TODO: better data structure for tracking write conflicts
+// use fixed-size hashmap
+#[derive(Debug, Clone, Copy)]
+struct WriteConflictReferee {
+    requests: [(usize, ([usize; MAX_PROCESSES], usize)); MAX_OBJECTS], // (req_id, (array of process ids, current size))
+    requests_count: usize,
+}
+
+impl WriteConflictReferee {
+    fn new() -> Self {
+        WriteConflictReferee {
+            requests: [(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS],
+            requests_count: 0,
+            // conflicts: [(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS],
+            // conflicts_count: 0,
+        }
+    }
+
+    fn push_request(&mut self, req_id: usize, pid: usize) {
+        for i in 0..self.requests_count {
+            if self.requests[i].0 == req_id {
+                // found existing request
+                let pids_of_request = &mut self.requests[i].1 .0;
+                let array_len = &mut self.requests[i].1 .1;
+                for j in 0..*array_len {
+                    // don't add pid to list if the same process has already requested a write to the same location
+                    if pids_of_request[j] == pid {
+                        return; // already requested
+                    }
+                }
+                // add conflicts
+                pids_of_request[*array_len] = pid;
+                *array_len += 1;
+                return;
+            }
+        }
+    }
+
+    fn check_conflicts(&self, req_id: usize) -> Option<Vec<usize>> {
+        for i in 0..self.requests_count {
+            if self.requests[i].0 == req_id {
+                let array_len = self.requests[i].1 .1;
+                if array_len > 1 {
+                    let conflicting_pids = &self.requests[i].1 .0;
+                    return Some(conflicting_pids[0..array_len].to_vec());
+                }
+            }
+        }
+        None
+    }
+}
+
+// struct WriteConflictReferee {
+//     requests: HashMap<usize, Vec<usize>>, // K = req_id, processes
+//     conflicts: HashMap<usize, Vec<usize>>, // K = req_id, processes
+//     conflicts_count: usize,
+// }
+
 #[derive(Debug, Clone, Copy)]
 struct SharedState {
     alloc_info: AllocationInfo,
     starting_block: StartingBlock,
+    wcr: WriteConflictReferee,
 }
 
 impl SharedState {
@@ -156,6 +218,7 @@ impl SharedState {
                 start_time: None,
                 ready_processes: [false; MAX_PROCESSES],
             },
+            wcr: WriteConflictReferee::new(),
         }
     }
 }
@@ -336,6 +399,7 @@ mod tests {
 /// processes and the memory nodes present in the system at a given time.
 #[derive(Clone)]
 struct GroupView {
+    self_id: usize, // process ID of this instance
     processes: Vec<usize>,
     memory_nodes: Vec<MemoryNode>,
 }
@@ -343,8 +407,9 @@ unsafe impl Send for GroupView {} // required because MemoryNode contains raw po
 unsafe impl Sync for GroupView {}
 
 impl GroupView {
-    fn new() -> Self {
+    fn new(self_id: usize) -> Self {
         GroupView {
+            self_id,
             processes: Vec::new(),
             memory_nodes: Vec::new(),
         }
@@ -380,8 +445,8 @@ impl GroupView {
 #[derive(Debug)]
 pub struct RepCXLObject<T> {
     queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
-    ack_tx: mpsc::Sender<bool>,
-    ack_rx: mpsc::Receiver<bool>,
+    // ack_tx: mpsc::Sender<bool>,
+    // ack_rx: mpsc::Receiver<bool>,
     info: ObjectInfo,
 }
 
@@ -392,11 +457,11 @@ impl<T> RepCXLObject<T> {
         size: usize,
         queue: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
     ) -> Self {
-        let (ack_tx, ack_rx) = mpsc::channel();
+        // let (ack_tx, ack_rx) = mpsc::channel();
         RepCXLObject {
             queue_tx: queue,
-            ack_tx,
-            ack_rx,
+            // ack_tx,
+            // ack_rx,
             info: ObjectInfo::new(id, offset, size),
         }
     }
@@ -419,13 +484,14 @@ impl<T> RepCXLObject<T> {
         // @TODO: might be expensive to send the channel every time, consider storing the
         // objects in the shmuc_thread
 
+        let (ack_tx, ack_rx) = mpsc::channel();
         self.queue_tx
-            .send((self.info.offset, data, self.ack_tx.clone()))
+            .send((self.info.offset, data, ack_tx))
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
 
         // std::thread::sleep(Duration::from_millis(10));
         // wait for ack
-        match self.ack_rx.recv() {
+        match ack_rx.recv() {
             Ok(true) => Ok(()),
             Ok(false) => Err("Failed write operation".into()),
             Err(e) => Err(format!("Failed to receive ack: {}", e)),
@@ -452,7 +518,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let chunks = (size + chunk_size - 1) / chunk_size;
         let total_size = chunks * chunk_size;
 
-        let mut view = GroupView::new();
+        let mut view = GroupView::new(id);
         if id >= MAX_PROCESSES {
             panic!("Process ID must be between 0 and {}", MAX_PROCESSES - 1);
         }
@@ -662,7 +728,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             let rx = self.obj_queue_rx.take().expect("Receiver already taken");
             std::thread::spawn(move || {
                 // thread logic here
-                algorithms::write_verify(v, start_time, rt, rx);
+                algorithms::shmuc(v, start_time, rt, rx);
             });
 
             // block until after start time
