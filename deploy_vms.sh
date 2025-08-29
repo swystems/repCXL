@@ -3,7 +3,7 @@
 # daft script to deploy source when testing from local machines.
 # assumes SSH key auth & DEST directory existing
 
-EXCLUDE_LIST="{'test/','deploy.sh','example.asgard-bench.ini','.vscode','.config.hash'}"
+EXCLUDE_LIST="{'test/','shmem_test.c','deploy.sh','example.asgard-bench.ini','.vscode','.config.hash'}"
 DEST="dmem-test"
 USER=""
 NODES=("cxlvm1" "cxlvm2")

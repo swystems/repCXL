@@ -1,7 +1,8 @@
 #!/bin/bash
 # QEMU VM with CXL memory attached as default and only memory.
 # Assmues CXL memory on the host is on NUMA node 2
-# start in background
+# VMs start in background
+# assumes vms/ disks and this repo to be in HOME_FOLDER. See below
 
 source .env
 
@@ -12,8 +13,9 @@ if [ -z "$HOME_FOLDER" ]; then
 fi
 VM1_DISK="${HOME_FOLDER}/vms/ubuntu2404_1.qcow2"
 VM2_DISK="${HOME_FOLDER}/vms/ubuntu2404_2.qcow2"
-HOST_VM_FOLDER="${HOME_FOLDER}/dmem-replication"
+HOST_VM_FOLDER="${HOME_FOLDER}/repCXL"
 
+#create 16M of shared disk which will be mapped to CXL node
 truncate -s 16M /dev/shm/ivshmem
 chmod 666 /dev/shm/ivshmem
 

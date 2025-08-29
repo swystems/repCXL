@@ -1,9 +1,9 @@
 const CPU_FREQ: f64 = 3.6; // 3.6 GHz, adjust as necessary
 
 pub fn get_time_ns() -> u64 {
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .expect("SystemTime before UNIX EPOCH!");
+    let duration = std::time::Instant::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Instant before UNIX EPOCH!");
     duration.as_nanos() as u64
 }
 
