@@ -21,6 +21,7 @@ const DEFAULT_ATTEMPTS: &str = "1000";
 const DEFAULT_CLIENTS: &str = "2";
 const DEFAULT_OBJECTS: &str = "100";
 const DEFAULT_COMPUTE_NODES: &str = "2";
+const DEFAULT_ROUND_TIME_NS: &str = "1000000"; //1ms
 
 pub fn percentile(latencies: &Vec<u128>, p: f32) -> u128 {
     if latencies.is_empty() {
@@ -44,7 +45,7 @@ fn main() {
                 .short('r')
                 .long("round")
                 .help("Duration of the synchronous round of the replication protocol (in ns)")
-                .default_value("1000000") // 1 ms
+                .default_value(DEFAULT_ROUND_TIME_NS) // 1 ms
                 .value_parser(value_parser!(u64)),
         )
         .arg(

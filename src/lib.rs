@@ -665,7 +665,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 algorithms::write_verify(v, start_time, rt, rx);
             });
 
-            // block until start time
+            // block until after start time
             std::thread::sleep(Duration::from_secs(2));
         } else {
             error!("FATAL: No coordinator found in group");

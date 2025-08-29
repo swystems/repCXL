@@ -4,9 +4,10 @@ use std::time::{Duration, SystemTime};
 
 const ROUND_SLEEP_RATIO: f64 = 0.5; // Percentage of round time to sleep before busy-waiting
 
-pub fn wait_next_round(next_round: SystemTime, sleep_ratio: f64) {
+/// Wait until the specified start time, sleeping for a portion of the time and busy-waiting for the rest
+pub fn wait_start_time(start_time: SystemTime, sleep_ratio: f64) {
     // let treshold = next * 2;
-    let round_time = next_round
+    let round_time = start_time
         .duration_since(SystemTime::now())
         .unwrap_or(Duration::from_secs(0));
 
@@ -21,15 +22,55 @@ pub fn wait_next_round(next_round: SystemTime, sleep_ratio: f64) {
         std::thread::sleep(sleep_duration);
 
         // might sleep for more than the requested time
-        if SystemTime::now() > next_round {
+        if SystemTime::now() > start_time {
             return;
         }
+    }
+
+    while SystemTime::now() < start_time {
+        std::hint::spin_loop();
+        //std::thread::yield_now();
+    }
+}
+
+/// Wait for the next round to start. Returns its number and start time.
+/// Sleeps for a portion of the round time and busy-waits for the rest
+pub fn wait_next_round(
+    start_time: SystemTime,
+    round_time: Duration,
+    sleep_ratio: f64,
+) -> (u64, SystemTime) {
+    if sleep_ratio < 0.0 || sleep_ratio > 1.0 {
+        panic!("sleep_ratio must be between 0.0 and 1.0");
+    }
+
+    let elapsed = SystemTime::now().duration_since(start_time).unwrap();
+    let round_num = elapsed.div_duration_f64(round_time) as u64;
+    let wake_up_time = round_time.mul_f64(sleep_ratio);
+    let next_round =
+        start_time + Duration::from_nanos(round_time.as_nanos() as u64 * (round_num + 1));
+
+    // conversion required, operations with Duration accepts only u32 which
+    // would give a max of ~4 billion rounds - not much considering round times of
+    // microseconds or nanoseconds. from_nanos accepts u64 which gives us
+    // a large enough round number to cover thousands of years
+    let round_elapsed = Duration::from_nanos(
+        (elapsed.as_nanos() - (round_time.as_nanos() * round_num as u128)) as u64,
+    );
+
+    // we could have already spent some time doing stuff in the round
+    // so we have to take it into account (sleep amount is always relative to round start)
+    if round_elapsed < wake_up_time {
+        // uses nanosleep() syscall on linux
+        std::thread::sleep(wake_up_time - round_elapsed);
     }
 
     while SystemTime::now() < next_round {
         std::hint::spin_loop();
         //std::thread::yield_now();
     }
+
+    (round_num + 1, next_round)
 }
 
 /// Every round write 1 object to all memory nodes and read back to verify the write
@@ -43,7 +84,7 @@ pub fn write_verify<T: Copy + PartialEq + std::fmt::Debug>(
     let mut round_num = 0;
     // wait to start
     let mut next_round = start_time;
-    wait_next_round(next_round, ROUND_SLEEP_RATIO);
+    wait_start_time(start_time, ROUND_SLEEP_RATIO);
 
     loop {
         // logic here
@@ -90,11 +131,29 @@ pub fn write_verify<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        next_round += round_time;
-        round_num += 1;
-        wait_next_round(next_round, ROUND_SLEEP_RATIO);
+        (round_num, next_round) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
     }
 }
+
+// alternate write and read rounds and membership rounds in precise order
+// all processes must have same sync'd phases.
+enum Round {
+    Write,
+    Read,
+    MembershipChange,
+}
+
+// fn shmuc_current_round(start_time: SystemTime, round_time: Duration) -> (u128, Round) {
+//     let elapsed = SystemTime::now().duration_since(start_time).unwrap();
+//     let round_num = elapsed.div_duration_f32(round_time);
+//     if round_num % 10 == 0 {
+//         Round::MembershipChange
+//     } else if round_num % 2 == 0 {
+//         Round::Write
+//     } else {
+//         Round::Read
+//     }
+// }
 
 /// Shared Memory Uniform Coordination
 pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
@@ -104,9 +163,10 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
     obj_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
 ) {
     let mut round_num = 0;
+
     // wait to start
     let mut next_round = start_time;
-    wait_next_round(next_round, ROUND_SLEEP_RATIO);
+    wait_start_time(start_time, ROUND_SLEEP_RATIO);
 
     loop {
         // logic here
@@ -114,6 +174,8 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
             "Round #{round_num}, delay {:?}",
             SystemTime::now().duration_since(next_round).unwrap()
         );
+
+        let mut current_round = Round::Write;
 
         match obj_queue_rx.try_recv() {
             Ok((offset, data, ack_tx)) => {
@@ -153,8 +215,6 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        next_round += round_time;
-        round_num += 1;
-        wait_next_round(next_round, ROUND_SLEEP_RATIO);
+        (round_num, next_round) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
     }
 }
