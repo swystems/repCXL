@@ -227,7 +227,8 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
 
     let mut shmuc_sm = ShmucStateMachine::new();
     // get shared write conflict referee
-    let wcr = &mut view.get_master_node().unwrap().get_state().wcr;
+    let mstate = view.get_master_node().unwrap().get_state();
+    let wcr = mstate.get_wcr();
     let mut pending_write_req = None;
 
     // wait to start
