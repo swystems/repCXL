@@ -2,8 +2,8 @@ use libc::{c_int, c_void, mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use std::fs::OpenOptions;
 use std::os::unix::io::AsRawFd;
 
-pub mod allocation_info;
-use allocation_info::Allocator;
+pub mod allocator;
+use allocator::Allocator;
 mod starting_block;
 use starting_block::StartingBlock;
 pub mod wcr;

@@ -7,7 +7,6 @@
 //! errors for performance testing purposes only.
 //!
 
-use log::{debug, error, info, warn};
 use rand::Rng;
 
 const FAILURE_PROBABILITY: f32 = 0.0; // 1% chance of failure

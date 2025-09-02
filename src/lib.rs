@@ -7,10 +7,10 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 mod algorithms;
-mod memory;
 mod safe_memio;
-use memory::allocation_info::ObjectInfo;
-use memory::{MemoryNode, SharedState};
+mod shmem;
+use shmem::allocator::ObjectInfo;
+use shmem::{MemoryNode, SharedState};
 
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
 const MAX_OBJECTS: usize = 128; // Maximum number of objects
