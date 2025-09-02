@@ -1,59 +1,72 @@
 use crate::{MAX_OBJECTS, MAX_PROCESSES};
 
-// @TODO: better data structure for tracking write conflicts
-// use fixed-size hashmap
+/// Write Conflict Checker to detect write conflicts on the same memory location.
+///
+/// Uses a fixed-size hashmap with linear probing to store write requests.
+/// Fixed-size is required to avoid overwriting object space in memory nodes.
+/// Each entry maps a request ID to an array of process IDs that have requested
+/// a write to that location.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct WriteConflictReferee {
-    requests: [(usize, ([usize; MAX_PROCESSES], usize)); MAX_OBJECTS], // (req_id, (array of process ids, current size))
-    requests_count: usize,
+pub(crate) struct WriteConflictChecker {
+    // fixed-size hashmap: key = req_id, value = (array of pids, number of pids).
+    // 2D array to handle collisions with linear probing
+    requests: [[(usize, ([usize; MAX_PROCESSES], usize)); MAX_OBJECTS]; MAX_OBJECTS],
 }
 
-impl WriteConflictReferee {
+impl WriteConflictChecker {
     pub(crate) fn new() -> Self {
-        WriteConflictReferee {
-            requests: [(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS],
-            requests_count: 0,
-            // conflicts: [(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS],
-            // conflicts_count: 0,
+        WriteConflictChecker {
+            requests: [[(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS]; MAX_OBJECTS],
         }
     }
 
-    pub(crate) fn push_request(&mut self, req_id: usize, pid: usize) {
-        for i in 0..self.requests_count {
-            if self.requests[i].0 == req_id {
-                // found existing request
-                let pids_of_request = &mut self.requests[i].1 .0;
-                let array_len = &mut self.requests[i].1 .1;
-                for j in 0..*array_len {
-                    // don't add pid to list if the same process has already requested a write to the same location
-                    if pids_of_request[j] == pid {
-                        return; // already requested
-                    }
-                }
-                // add conflicts
-                pids_of_request[*array_len] = pid;
-                *array_len += 1;
-                return;
+    fn hash(&self, key: usize) -> usize {
+        key % MAX_OBJECTS
+    }
+
+    fn get_request(&mut self, key: usize) -> Option<&mut ([usize; MAX_PROCESSES], usize)> {
+        let index = self.hash(key);
+        for i in 0..MAX_OBJECTS {
+            if self.requests[index][i].0 == key {
+                return Some(&mut self.requests[index][i].1);
             }
-        }
-    }
-
-    pub(crate) fn check_conflicts(&self, req_id: usize) -> Option<Vec<usize>> {
-        for i in 0..self.requests_count {
-            if self.requests[i].0 == req_id {
-                let array_len = self.requests[i].1 .1;
-                if array_len > 1 {
-                    let conflicting_pids = &self.requests[i].1 .0;
-                    return Some(conflicting_pids[0..array_len].to_vec());
-                }
+            if self.requests[index][i].0 == 0 {
+                return None; // empty slot means key not present
             }
         }
         None
     }
-}
 
-// struct WriteConflictReferee {
-//     requests: HashMap<usize, Vec<usize>>, // K = req_id, processes
-//     conflicts: HashMap<usize, Vec<usize>>, // K = req_id, processes
-//     conflicts_count: usize,
-// }
+    pub(crate) fn push_request(&mut self, req_id: usize, pid: usize) {
+        if let Some((pids_of_request, num_of_pids)) = self.get_request(req_id) {
+            // found existing request
+            for j in 0..*num_of_pids {
+                // don't add pid to list if the same process has already requested a write to the same location
+                if pids_of_request[j] == pid {
+                    return; // already requested
+                }
+            }
+            // add conflicting pids
+            pids_of_request[*num_of_pids] = pid;
+            *num_of_pids += 1;
+            return;
+        } else {
+            // add new one
+            let index = self.hash(req_id);
+            self.requests[index][0] = (req_id, ([pid; MAX_PROCESSES], 1));
+        }
+    }
+
+    pub(crate) fn check_conflicts(&mut self, req_id: usize) -> Option<Vec<usize>> {
+        if let Some((conflicting_pids, num_of_pids)) = self.get_request(req_id) {
+            if *num_of_pids > 1 {
+                return Some(conflicting_pids[0..*num_of_pids].to_vec());
+            }
+        }
+        None
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.requests = [[(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS]; MAX_OBJECTS];
+    }
+}

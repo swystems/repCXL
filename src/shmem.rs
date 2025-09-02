@@ -7,7 +7,7 @@ use allocator::Allocator;
 mod starting_block;
 use starting_block::StartingBlock;
 pub mod wcr;
-use wcr::WriteConflictReferee;
+use wcr::WriteConflictChecker;
 
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 
@@ -21,7 +21,7 @@ extern "C" {
 pub(crate) struct SharedState {
     pub(crate) allocator: Allocator,
     starting_block: StartingBlock,
-    wcr: WriteConflictReferee,
+    wcr: WriteConflictChecker,
 }
 
 impl SharedState {
@@ -29,7 +29,7 @@ impl SharedState {
         SharedState {
             allocator: Allocator::new(total_size, chunk_size),
             starting_block: StartingBlock::new(),
-            wcr: WriteConflictReferee::new(),
+            wcr: WriteConflictChecker::new(),
         }
     }
 
@@ -37,7 +37,7 @@ impl SharedState {
         &mut self.starting_block
     }
 
-    pub(crate) fn get_wcr(&mut self) -> &mut WriteConflictReferee {
+    pub(crate) fn get_wcr(&mut self) -> &mut WriteConflictChecker {
         &mut self.wcr
     }
 }
