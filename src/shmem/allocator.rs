@@ -36,7 +36,7 @@ impl Allocator {
         }
     }
 
-    /// Get the object entry in from the index by its id.
+    /// Get the object info in from the index.
     /// Returns Some<offset> if found, None otherwise.
     /// # Arguments
     /// * `id` - Unique identifier for the object.
@@ -51,8 +51,8 @@ impl Allocator {
         None
     }
 
-    /// Allocates an object in the first free slot (first fit allocation) in the shared object index
-    /// and returns Some<offset> if a suitable slot is found, otherwise None.
+    /// Allocates an object in the first free slot (first fit allocation)
+    /// Returns Some<offset> if a suitable slot is found, otherwise None.
     ///
     /// @TODO: better allocation algorithm
     ///
@@ -73,11 +73,12 @@ impl Allocator {
             return None;
         }
 
-        // bad allocation algorithm
+        // suboptimal allocation algorithm
         // loses space when a smaller object takes the place of a larger one which was freed
         for i in 0..MAX_OBJECTS {
             let entry = self.object_index[i];
             if entry.is_none() {
+
                 let start = if i == 0 {
                     0
                 } else {
@@ -85,13 +86,15 @@ impl Allocator {
                         .map(|e| e.offset as usize + e.size)
                         .expect("Previous entry should exist")
                 };
-                let end = if i == MAX_OBJECTS - 1 {
-                    self.total_size
-                } else {
-                    self.object_index[i + 1]
-                        .map(|e| e.offset as usize)
-                        .unwrap_or(self.total_size)
-                };
+
+                let mut end = self.total_size;
+                for j in (i + 1)..MAX_OBJECTS {
+                    if let Some(obj) = self.object_index[j] {
+                        end = obj.offset;
+                        break;
+                    }
+                }
+
                 if start + size <= end {
                     self.object_index[i] = Some(ObjectInfo::new(id, start, size));
                     self.allocated_size += size;
