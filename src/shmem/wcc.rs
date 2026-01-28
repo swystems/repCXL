@@ -1,72 +1,83 @@
 use crate::{MAX_OBJECTS, MAX_PROCESSES};
 
 /// Write Conflict Checker (WCC) register to solve write conflicts
-///
-/// Uses a fixed-size hashmap with linear probing to store write requests.
-/// Fixed-size is required to avoid overwriting object space in memory nodes.
-/// Each entry maps a request ID to an array of process IDs that have requested
-/// a write to that location.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct WriteConflictChecker {
-    // fixed-size hashmap: key = req_id, value = (array of pids, number of pids).
-    // 2D array to handle collisions with linear probing
-    requests: [[(usize, ([usize; MAX_PROCESSES], usize)); MAX_OBJECTS]; MAX_OBJECTS],
+pub(crate) struct WCC {
+    // array of round values indexed by process ID
+    p_round: ([u64; MAX_PROCESSES])
 }
 
-impl WriteConflictChecker {
+impl WCC {
+    fn new() -> Self {
+        WCC {
+            p_round: [0; MAX_PROCESSES],
+        }
+    }
+
+    fn write(&mut self, round: u64, pid: usize) {
+        if pid < 0 || pid > MAX_PROCESSES {
+            return; // invalid pid
+        }
+        self.p_round[pid] = round;
+    }
+
+    /// Check if the given process is the last writer for the given round.
+    /// Last writer criteria: 
+    /// - the winning process has written in the highest round smaller than
+    /// the current round
+    /// - in case of conflicts, the smallest pid wins
+    fn is_last(&self, current_round:u64, round: u64, pid: usize) -> bool {
+        if pid < 0 || pid > MAX_PROCESSES {
+            return false; // invalid pid
+        }
+
+        for i in 0..MAX_PROCESSES {
+            if current_round > self.p_round[i] && self.p_round[i] > round {
+                return false; // another process has written in the same or a later round
+            }
+            if self.p_round[i] == round && i < pid {
+                return false; // another process has lower pid
+            }
+        }
+        self.p_round[pid] == round
+    }
+}
+
+
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct WCCMultiObject {
+    // fixed-size hashmap: key = req_id, value = (array of pids, number of pids).
+    // 2D array to handle collisions with linear probing
+    index_oids: [usize; MAX_OBJECTS],
+    objects: [WCC; MAX_OBJECTS],
+    objects_count: usize,
+}
+
+impl WCCMultiObject {
     pub(crate) fn new() -> Self {
-        WriteConflictChecker {
-            requests: [[(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS]; MAX_OBJECTS],
+        WCCMultiObject {
+            index_oids: [0; MAX_OBJECTS],
+            objects: [WCC::new(); MAX_OBJECTS],
+            objects_count: 0,
         }
     }
 
-    fn hash(&self, key: usize) -> usize {
-        key % MAX_OBJECTS
+    fn add_object(&mut self, oid: usize) {
+        self.index_oids[self.objects_count] = oid;
+        self.objects_count += 1;
     }
 
-    fn get_request(&mut self, key: usize) -> Option<&mut ([usize; MAX_PROCESSES], usize)> {
-        let index = self.hash(key);
+    fn get_object_wcc(&mut self, oid: usize) -> Option<&mut WCC> {
         for i in 0..MAX_OBJECTS {
-            if self.requests[index][i].0 == key {
-                return Some(&mut self.requests[index][i].1);
-            }
-            if self.requests[index][i].0 == 0 {
-                return None; // empty slot means key not present
+            if self.index_oids[i] == oid {
+                return Some(&mut self.objects[i]);
             }
         }
-        None
-    }
-
-    pub(crate) fn push_request(&mut self, req_id: usize, pid: usize) {
-        if let Some((pids_of_request, num_of_pids)) = self.get_request(req_id) {
-            // found existing request
-            for j in 0..*num_of_pids {
-                // don't add pid to list if the same process has already requested a write to the same location
-                if pids_of_request[j] == pid {
-                    return; // already requested
-                }
-            }
-            // add conflicting pids
-            pids_of_request[*num_of_pids] = pid;
-            *num_of_pids += 1;
-            return;
-        } else {
-            // add new one
-            let index = self.hash(req_id);
-            self.requests[index][0] = (req_id, ([pid; MAX_PROCESSES], 1));
-        }
-    }
-
-    pub(crate) fn check_conflicts(&mut self, req_id: usize) -> Option<Vec<usize>> {
-        if let Some((conflicting_pids, num_of_pids)) = self.get_request(req_id) {
-            if *num_of_pids > 1 {
-                return Some(conflicting_pids[0..*num_of_pids].to_vec());
-            }
-        }
-        None
+        None // object id not found
     }
 
     pub(crate) fn clear(&mut self) {
-        self.requests = [[(0, ([0; MAX_PROCESSES], 0)); MAX_OBJECTS]; MAX_OBJECTS];
+        self.objects = [WCC::new(); MAX_OBJECTS];
     }
 }

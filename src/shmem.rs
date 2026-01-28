@@ -10,7 +10,8 @@ use allocator::Allocator;
 mod starting_block;
 use starting_block::StartingBlock;
 pub mod wcc;
-use wcc::WriteConflictChecker;
+use wcc::WCCMultiObject;
+
 
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 
@@ -20,7 +21,7 @@ const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 pub(crate) struct SharedState {
     pub(crate) allocator: Allocator,
     starting_block: StartingBlock,
-    wcc: WriteConflictChecker,
+    wcc_mo: WCCMultiObject,
 }
 
 impl SharedState {
@@ -28,7 +29,7 @@ impl SharedState {
         SharedState {
             allocator: Allocator::new(total_size, chunk_size),
             starting_block: StartingBlock::new(),
-            wcc: WriteConflictChecker::new(),
+            wcc_mo: WCCMultiObject::new(),
         }
     }
 
@@ -36,8 +37,8 @@ impl SharedState {
         &mut self.starting_block
     }
 
-    pub(crate) fn get_wcc(&mut self) -> &mut WriteConflictChecker {
-        &mut self.wcc
+    pub(crate) fn get_wcc_mo(&mut self) -> &mut WCCMultiObject {
+        &mut self.wcc_mo
     }
 }
 
@@ -58,10 +59,10 @@ impl MemoryNode {
     // assumes all processes/VMs use the same file path
     pub(crate) fn from_file(id: usize, path: &str, size: usize) -> Self {
         if size <= STATE_SIZE {
-            panic!("Size must be greater than SharedState size:\n\tAllocator: {}\n\tstarting_block: {}\n\twcc: {}", 
+            panic!("Size must be greater than SharedState size:\n\tAllocator: {}\n\tstarting_block: {}\n\twcc_mo: {}", 
                 std::mem::size_of::<Allocator>(), 
                 std::mem::size_of::<StartingBlock>(), 
-                std::mem::size_of::<WriteConflictChecker>()
+                std::mem::size_of::<WCCMultiObject>()
             );
         }
 

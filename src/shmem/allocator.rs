@@ -14,7 +14,7 @@ impl ObjectInfo {
     }
 }
 
-/// Memory allocation information. Process coordinator has write acess
+/// Memory allocation information. Process coordinator has write access
 /// while replicas have read-only access.
 ///
 /// @TODO: add coordinator-only write checks
