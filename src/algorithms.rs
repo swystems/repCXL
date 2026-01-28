@@ -228,7 +228,7 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
     let mut shmuc_sm = ShmucStateMachine::new();
     // get shared write conflict referee
     let mstate = view.get_master_node().unwrap().get_state();
-    let wcr = mstate.get_wcr();
+    let wcc = mstate.get_wcc();
     let mut pending_write_req = None;
 
     // wait to start
@@ -248,8 +248,8 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
                 // try to pop an object from the queue
                 match obj_queue_rx.try_recv() {
                     Ok((offset, data, ack_tx)) => {
-                        // WCR check. We use the offset as request ID
-                        wcr.push_request(offset, view.self_id);
+                        // WCC check. We use the offset as request ID
+                        wcc.push_request(offset, view.self_id);
                         // write data to all memory nodes
                         for node in &view.memory_nodes {
                             let addr = node.addr_at(offset) as *mut T;
@@ -293,9 +293,9 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
                     // write data to all memory nodes
                     let mut success = true;
 
-                    // WCR check
+                    // WCC check
                     // @TODO: time check the operation!
-                    if let Some(conflicting_pids) = wcr.check_conflicts(*offset) {
+                    if let Some(conflicting_pids) = wcc.check_conflicts(*offset) {
                         // handle write conflict
                         info!("conflict detected with pids: {:?}", conflicting_pids);
                         // min process ID wins

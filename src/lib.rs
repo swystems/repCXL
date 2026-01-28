@@ -23,9 +23,9 @@ struct GroupView {
     processes: Vec<usize>,
     memory_nodes: Vec<MemoryNode>,
 }
+
 unsafe impl Send for GroupView {} // required because MemoryNode contains raw pointers
 unsafe impl Sync for GroupView {}
-
 impl GroupView {
     fn new(self_id: usize) -> Self {
         GroupView {
@@ -76,7 +76,7 @@ impl<T> RepCXLObject<T> {
 
     pub fn write(&self, data: T) -> Result<(), String> {
         // check size matches
-        // currently broken because non coordinatoor will read the chunk size of T
+        // currently broken because non coordinator will read the chunk size of T
         // from the shared state, which is likely more than the actual size of T
         // @TODO: fix
         // if std::mem::size_of_val(&data) != self.info.size {

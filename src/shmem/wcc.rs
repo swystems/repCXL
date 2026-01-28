@@ -1,6 +1,6 @@
 use crate::{MAX_OBJECTS, MAX_PROCESSES};
 
-/// Write Conflict Checker to detect write conflicts on the same memory location.
+/// Write Conflict Checker (WCC) register to solve write conflicts
 ///
 /// Uses a fixed-size hashmap with linear probing to store write requests.
 /// Fixed-size is required to avoid overwriting object space in memory nodes.
