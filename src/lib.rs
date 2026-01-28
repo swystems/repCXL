@@ -1,341 +1,25 @@
 /// TODO: make state size aligned with chunk size of repCXL?
 /// WARNING: currently assumes same memory layout and alignment across
 /// all machines.
-use libc::{c_int, c_void, mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use log::{debug, error, info, warn};
-use std::fs::OpenOptions;
-use std::os::unix::io::AsRawFd;
+
 use std::sync::mpsc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 mod algorithms;
+mod safe_memio;
+mod shmem;
+use shmem::allocator::ObjectInfo;
+use shmem::{MemoryNode, SharedState};
 
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
 const MAX_OBJECTS: usize = 128; // Maximum number of objects
-const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
-
-#[link(name = "numa")]
-extern "C" {
-    pub fn numa_alloc_onnode(size: usize, node: c_int) -> *mut c_void;
-    pub fn numa_free(mem: *mut c_void, size: usize);
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ObjectInfo {
-    id: usize,
-    offset: usize,
-    size: usize,
-}
-
-impl ObjectInfo {
-    fn new(id: usize, offset: usize, size: usize) -> Self {
-        ObjectInfo { id, offset, size }
-    }
-}
-
-/// Shared fixed-size array indexed by process ID
-#[derive(Debug, Clone, Copy)]
-struct StartingBlock {
-    start_time: Option<SystemTime>,
-    ready_processes: [bool; MAX_PROCESSES],
-}
-
-/// Memory allocation information. Process coordinator has write acess
-/// while replicas have read-only access.
-///
-/// @TODO: add coordinator-only write checks
-#[derive(Copy, Clone, Debug)]
-struct AllocationInfo {
-    total_size: usize,
-    allocated_size: usize,
-    chunk_size: usize,
-    object_index: [Option<ObjectInfo>; MAX_OBJECTS],
-}
-
-impl AllocationInfo {
-    fn new(total_size: usize, chunk_size: usize) -> Self {
-        AllocationInfo {
-            total_size,
-            allocated_size: 0,
-            chunk_size,
-            object_index: [None; MAX_OBJECTS], // Initialize with None
-        }
-    }
-
-    /// Get the object entry in from the index by its id.
-    /// Returns Some<offset> if found, None otherwise.
-    /// # Arguments
-    /// * `id` - Unique identifier for the object.
-    fn lookup_object(&self, id: usize) -> Option<ObjectInfo> {
-        for entry in self.object_index {
-            if let Some(obj) = entry {
-                if obj.id == id {
-                    return entry;
-                }
-            }
-        }
-        None
-    }
-
-    /// Allocates an object in the first free slot (first fit allocation) in the shared object index
-    /// and returns Some<offset> if a suitable slot is found, otherwise None.
-    ///
-    /// @TODO: better allocation algorithm
-    ///
-    /// ## Arguments
-    /// * 'id' - Unique identifier for the object.
-    /// * `size` - Size of the memory to allocate.
-    fn alloc_object(&mut self, id: usize, size: usize) -> Option<usize> {
-        let chunks = (size + self.chunk_size - 1) / self.chunk_size; // Round up to nearest chunk size
-        let size = chunks * self.chunk_size;
-
-        if self.allocated_size + size > self.total_size {
-            warn!("Not enough space");
-            return None;
-        }
-
-        if self.lookup_object(id).is_some() {
-            info!("Object with id {} already exists", id);
-            return None;
-        }
-
-        // bad allocation algorithm
-        // loses space when a smaller object takes the place of a larger one which was freed
-        for i in 0..MAX_OBJECTS {
-            let entry = self.object_index[i];
-            if entry.is_none() {
-                let start = if i == 0 {
-                    0
-                } else {
-                    self.object_index[i - 1]
-                        .map(|e| e.offset as usize + e.size)
-                        .expect("Previous entry should exist")
-                };
-                let end = if i == MAX_OBJECTS - 1 {
-                    self.total_size
-                } else {
-                    self.object_index[i + 1]
-                        .map(|e| e.offset as usize)
-                        .unwrap_or(self.total_size)
-                };
-                if start + size <= end {
-                    self.object_index[i] = Some(ObjectInfo::new(id, start, size));
-                    self.allocated_size += size;
-                    return Some(start);
-                }
-            }
-        }
-        warn!("Failed allocation: no free slot available");
-        None
-    }
-
-    /// Removes an object from the state by its id
-    fn dealloc_object(&mut self, id: usize) {
-        self.object_index.iter_mut().for_each(|entry| {
-            if let Some(obj) = entry {
-                if obj.id == id {
-                    self.allocated_size -= obj.size;
-                    *entry = None; // Mark as free
-                }
-            }
-        });
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SharedState {
-    alloc_info: AllocationInfo,
-    starting_block: StartingBlock,
-}
-
-impl SharedState {
-    fn new(total_size: usize, chunk_size: usize) -> Self {
-        SharedState {
-            alloc_info: AllocationInfo::new(total_size, chunk_size),
-            starting_block: StartingBlock {
-                start_time: None,
-                ready_processes: [false; MAX_PROCESSES],
-            },
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Debug, Hash, Clone)]
-enum MemoryType {
-    Numa,
-    File,
-}
-
-// @TODO: add type for addr since repcxl is currently type-specific?
-#[derive(PartialEq, Eq, Hash, Clone)]
-pub struct MemoryNode {
-    id: usize,
-    type_: MemoryType,
-    state_addr: *mut SharedState,
-    addr: *mut u8,
-    size: usize,
-}
-
-impl MemoryNode {
-    // Create a MemoryNode from a file in tmpfs
-    // Processes/VMs on same host will share the memory region, not guaranteed
-    // across different hosts
-    // assumes all processes/VMs use the same file path
-    fn from_file(id: usize, path: &str, size: usize) -> Self {
-        if size <= STATE_SIZE {
-            panic!("Size must be greater than AllocationInfo size");
-        }
-
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .expect("Failed to open shared memory. Does the file exist?");
-
-        let ptr = unsafe {
-            mmap(
-                std::ptr::null_mut(),
-                size,
-                PROT_READ | PROT_WRITE,
-                MAP_SHARED,
-                file.as_raw_fd(),
-                0,
-            )
-        };
-
-        if ptr == libc::MAP_FAILED {
-            panic!(
-                "Failed to mmap {}. Error: {}",
-                path,
-                std::io::Error::last_os_error()
-            );
-        }
-
-        let ptr = ptr as *mut u8;
-
-        MemoryNode {
-            id,
-            type_: MemoryType::File,
-            state_addr: ptr as *mut SharedState,
-            addr: unsafe { ptr.offset(STATE_SIZE as isize) },
-            size,
-        }
-    }
-
-    /// WARNING: placeholder only. memory is not shared, every node will its own memory region
-    fn _from_numa(id: usize, size: usize, numa_node: i32) -> Self {
-        let ptr = unsafe { numa_alloc_onnode(size, numa_node) };
-        if ptr.is_null() {
-            panic!("numa_alloc_onnode failed");
-        }
-        let ptr = ptr as *mut u8;
-
-        MemoryNode {
-            id,
-            type_: MemoryType::Numa,
-            state_addr: ptr as *mut SharedState,
-            addr: unsafe { ptr.offset(STATE_SIZE as isize) },
-            size,
-        }
-    }
-
-    fn addr_at(&self, offset: usize) -> *mut u8 {
-        if offset >= self.size {
-            panic!("Offset out of bounds");
-        }
-        unsafe { self.addr.offset(offset as isize) }
-    }
-
-    // copy of the shared state (which remains unchanged)
-    fn read_state(&self) -> SharedState {
-        unsafe { std::ptr::read(self.state_addr) } // WARNING: might want to read_unaligned
-    }
-
-    // mutable reference to the shared state
-    fn get_state(&self) -> &mut SharedState {
-        unsafe { &mut *self.state_addr }
-    }
-
-    fn write_state(&self, state: SharedState) {
-        unsafe {
-            std::ptr::write(self.state_addr, state); // WARNING: might want to write_unaligned
-        }
-    }
-}
-
-impl Drop for MemoryNode {
-    fn drop(&mut self) {
-        if self.type_ == MemoryType::Numa {
-            unsafe {
-                numa_free(self.addr as *mut c_void, self.size);
-            }
-        } else if self.type_ == MemoryType::File {
-            unsafe {
-                munmap(self.addr as *mut libc::c_void, self.size);
-            }
-            // File is automatically closed when it goes out of scope
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::remove_file;
-
-    #[test]
-    fn test_memory_node_from_file() {
-        let mnid = 1;
-        let path = "/dev/shm/repCXL_test";
-        let size = 4096; // 1 KiB
-
-        // Create and open the file with read/write permissions
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)
-            .expect("Failed to create/open file in tmpfs");
-
-        // Resize the file to 4096 bytes (one page)
-        file.set_len(4096).expect("Failed to set file length");
-
-        let node = MemoryNode::from_file(mnid, path, size);
-        assert_eq!(node.id, mnid);
-        assert_eq!(node.type_, MemoryType::File);
-        assert!(!node.addr.is_null());
-        assert_eq!(node.size, size); // 1 KiB
-
-        // Clean up: remove the tmpfs file
-        remove_file(path).expect("Failed to remove tmpfs file");
-    }
-
-    #[test]
-    fn test_memory_node_from_numa() {
-        let mnid = 0;
-        let size = 1024; // 1 KiB
-        let numa_node = 0; // Node 0 should exist on most systems
-
-        let node = MemoryNode::_from_numa(mnid, size, numa_node);
-
-        unsafe {
-            *node.addr = 31;
-            // Initialize the shared memory region to zero
-            std::ptr::write_bytes(node.addr, 4, size);
-        }
-
-        assert_eq!(node.id, mnid);
-        assert_eq!(node.type_, MemoryType::Numa);
-        assert!(!node.addr.is_null());
-
-        assert_eq!(node.size, size); // 1 KiB
-    }
-}
 
 /// The current membership of the group. Stores both the
 /// processes and the memory nodes present in the system at a given time.
 #[derive(Clone)]
 struct GroupView {
+    self_id: usize, // process ID of this instance
     processes: Vec<usize>,
     memory_nodes: Vec<MemoryNode>,
 }
@@ -343,8 +27,9 @@ unsafe impl Send for GroupView {} // required because MemoryNode contains raw po
 unsafe impl Sync for GroupView {}
 
 impl GroupView {
-    fn new() -> Self {
+    fn new(self_id: usize) -> Self {
         GroupView {
+            self_id,
             processes: Vec::new(),
             memory_nodes: Vec::new(),
         }
@@ -370,19 +55,10 @@ impl GroupView {
 }
 
 /// Shared replicated object across memory nodes
-// pub struct RepCXLObject {
-//     pub id: usize,
-//     pub size: usize,
-//     addresses: HashMap<usize, *mut u8>, // MemoryNode id-> address in that node
-// }
-
-/// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T> {
     queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
-    ack_tx: mpsc::Sender<bool>,
-    ack_rx: mpsc::Receiver<bool>,
-    info: ObjectInfo,
+    info: ObjectInfo, // could also just store the offset
 }
 
 impl<T> RepCXLObject<T> {
@@ -392,11 +68,8 @@ impl<T> RepCXLObject<T> {
         size: usize,
         queue: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
     ) -> Self {
-        let (ack_tx, ack_rx) = mpsc::channel();
         RepCXLObject {
             queue_tx: queue,
-            ack_tx,
-            ack_rx,
             info: ObjectInfo::new(id, offset, size),
         }
     }
@@ -419,13 +92,14 @@ impl<T> RepCXLObject<T> {
         // @TODO: might be expensive to send the channel every time, consider storing the
         // objects in the shmuc_thread
 
+        let (ack_tx, ack_rx) = mpsc::channel();
         self.queue_tx
-            .send((self.info.offset, data, self.ack_tx.clone()))
+            .send((self.info.offset, data, ack_tx))
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
 
         // std::thread::sleep(Duration::from_millis(10));
         // wait for ack
-        match self.ack_rx.recv() {
+        match ack_rx.recv() {
             Ok(true) => Ok(()),
             Ok(false) => Err("Failed write operation".into()),
             Err(e) => Err(format!("Failed to receive ack: {}", e)),
@@ -452,7 +126,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let chunks = (size + chunk_size - 1) / chunk_size;
         let total_size = chunks * chunk_size;
 
-        let mut view = GroupView::new();
+        let mut view = GroupView::new(id);
         if id >= MAX_PROCESSES {
             panic!("Process ID must be between 0 and {}", MAX_PROCESSES - 1);
         }
@@ -506,12 +180,12 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     }
 
     // Get a mutable reference to the starting block from the master node
-    fn get_starting_block(&self) -> Result<&mut StartingBlock, &str> {
+    fn get_state_from_master(&self) -> Result<&mut SharedState, &str> {
         if let Some(master) = self.view.get_master_node() {
             let state = master.get_state();
-            return Ok(&mut state.starting_block);
+            return Ok(state);
         }
-        Err("Could not read starting block from master node!")
+        Err("Could not read state from master node!")
     }
 
     pub fn dump_states(&mut self) {
@@ -538,7 +212,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let mut state = self.read_state_from_any().unwrap();
 
         // try to alloc object
-        match state.alloc_info.alloc_object(id, size) {
+        match state.allocator.alloc_object(id, size) {
             Some(offset) => {
                 for node in &self.view.memory_nodes {
                     // write state to every memory node
@@ -548,7 +222,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 // clone the object transmission queue
                 let tx = self.obj_queue_tx.clone();
                 // create the new RepCXLObject
-
                 let obj = RepCXLObject::new(id, offset, size, tx);
 
                 self.num_of_objects += 1;
@@ -570,7 +243,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
     pub fn remove_object(&mut self, id: usize) {
         let mut state = self.read_state_from_any().unwrap();
-        state.alloc_info.dealloc_object(id);
+        state.allocator.dealloc_object(id);
 
         // Update the shared state in each memory node
         for node in &mut self.view.memory_nodes {
@@ -593,7 +266,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         let state = self.read_state_from_any().unwrap();
 
-        if let Some(oi) = state.alloc_info.lookup_object(id) {
+        if let Some(oi) = state.allocator.lookup_object(id) {
             info!("Object found in shared state");
             let obj = RepCXLObject::new(id, oi.offset, oi.size, self.obj_queue_tx.clone());
             return Some(obj);
@@ -617,10 +290,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// ensure consistency.
     pub fn sync_start(&mut self) {
         if let Some(coord) = self.view.get_coordinator() {
-            let sblock = self.get_starting_block().unwrap();
+            let mstate = self.get_state_from_master().unwrap();
+            let sblock = mstate.get_starting_block();
             let start_time;
             // mark self as ready
-            sblock.ready_processes[self.id] = true;
+            sblock.mark_ready(self.id);
             info!("Process {} marked as ready.", self.id);
 
             loop {
@@ -628,21 +302,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                     // info!("Process {} is the coordinator", self.id);
 
                     // check if all processes are ready
-                    if self
-                        .view
-                        .processes
-                        .iter()
-                        .all(|&pid| sblock.ready_processes[pid])
-                    {
+                    if sblock.all_ready(self.view.processes.clone()) {
                         start_time = std::time::SystemTime::now() + Duration::from_secs(1);
-                        sblock.start_time = Some(start_time);
+                        sblock.start_at(start_time);
                         info!("Rounds starting at {:?}", start_time);
 
                         break;
                     }
-                    // break; //temp
-                } else if sblock.start_time.is_some() {
-                    start_time = sblock.start_time.unwrap();
+                } else if sblock.start_is_scheduled() {
+                    start_time = sblock.get_start_time().unwrap();
                     info!(
                         "Process {} sees round starting time set to {:?}",
                         self.id, start_time
@@ -661,11 +329,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // let (tx, rx) = mpsc::channel();
             let rx = self.obj_queue_rx.take().expect("Receiver already taken");
             std::thread::spawn(move || {
-                // thread logic here
-                algorithms::write_verify(v, start_time, rt, rx);
+                algorithms::shmuc(v, start_time, rt, rx);
             });
 
-            // block until start time
+            // block until after start time
             std::thread::sleep(Duration::from_secs(2));
         } else {
             error!("FATAL: No coordinator found in group");
