@@ -12,7 +12,7 @@ const NODE_PATHS: [&str; 3] = [
     "/dev/shm/repCXL_test1",
     "/dev/shm/repCXL_test2",
 ];
-const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
+const MEMORY_SIZE: usize = 100 * 1024 * 1024; // 100 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
 
@@ -105,16 +105,16 @@ fn main() {
     let threads = matches.get_one::<u32>("threads").unwrap().clone();
     let num_of_objects = matches.get_one::<usize>("objects").unwrap().clone();
 
-    // init metrics vectors
 
     let round_time = Duration::from_nanos(round_time_ns);
 
     let mut client_handles = Vec::new();
     let total_processes = threads * nodes;
 
+    // init metrics vectors
     let (lats_tx, lats_rx) = std::sync::mpsc::channel();
     let (tput_tx, tput_rx) = std::sync::mpsc::channel();
-    for c in 0..threads {
+    for c in 0..threads {   
         let lats_tx = lats_tx.clone();
         let tput_tx = tput_tx.clone();
         let handle = std::thread::spawn(move || {

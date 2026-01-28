@@ -329,7 +329,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // let (tx, rx) = mpsc::channel();
             let rx = self.obj_queue_rx.take().expect("Receiver already taken");
             std::thread::spawn(move || {
-                algorithms::shmuc(v, start_time, rt, rx);
+                algorithms::best_effort::async_best_effort(v, start_time, rt, rx);
             });
 
             // block until after start time

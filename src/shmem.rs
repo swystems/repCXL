@@ -58,7 +58,11 @@ impl MemoryNode {
     // assumes all processes/VMs use the same file path
     pub(crate) fn from_file(id: usize, path: &str, size: usize) -> Self {
         if size <= STATE_SIZE {
-            panic!("Size must be greater than Allocator size");
+            panic!("Size must be greater than SharedState size:\n\tAllocator: {}\n\tstarting_block: {}\n\twcc: {}", 
+                std::mem::size_of::<Allocator>(), 
+                std::mem::size_of::<StartingBlock>(), 
+                std::mem::size_of::<WriteConflictChecker>()
+            );
         }
 
         let file = OpenOptions::new()
@@ -139,7 +143,7 @@ mod tests {
     fn test_memory_node_from_file() {
         let mnid = 1;
         let path = "/dev/shm/repCXL_test";
-        let size = 4096; // 1 KiB
+        let size: usize = 10 * 1024 * 1024; // 1 MiB
 
         // Create and open the file with read/write permissions
         let file = OpenOptions::new()
@@ -149,13 +153,12 @@ mod tests {
             .open(path)
             .expect("Failed to create/open file in tmpfs");
 
-        // Resize the file to 4096 bytes (one page)
-        file.set_len(4096).expect("Failed to set file length");
+        file.set_len(size as u64).expect("Failed to set file length");
 
         let node = MemoryNode::from_file(mnid, path, size);
         assert_eq!(node.id, mnid);
         assert!(!node.obj_addr.is_null());
-        assert_eq!(node.size, size); // 1 KiB
+        assert_eq!(node.size, size);
 
         // Clean up: remove the tmpfs file
         remove_file(path).expect("Failed to remove tmpfs file");
