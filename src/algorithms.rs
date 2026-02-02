@@ -1,9 +1,11 @@
 use log::{debug, error, warn};
+use std::fmt::Write;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
 use crate::safe_memio;
 use crate::GroupView;
+use crate::WriteRequest;
 
 
 pub mod best_effort;
@@ -17,7 +19,7 @@ pub fn from_config<T: Copy + PartialEq + std::fmt::Debug>(
     view: GroupView,
     st: SystemTime,
     round_time: Duration,
-    req_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
+    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
 ) {
     match ALGORITHM {
         "async_best_effort" => best_effort::async_best_effort(
@@ -178,40 +180,26 @@ pub fn _write_verify<T: Copy + PartialEq + std::fmt::Debug>(
 enum WriteError {
     MemoryNodeFailure(usize), // node id
     AckSendFailure,
-    NoMoreClients,
 }
 
-fn replicate<T: Copy>(req: Result<(usize, T, mpsc::Sender<bool>), mpsc::TryRecvError>, view: &GroupView) -> Result<(), WriteError> {
+fn replicate<T: Copy>(req: WriteRequest<T>, view: &GroupView) -> Result<(), WriteError> {
+    let (offset, data, ack_tx) = req.to_tuple();
 
-    match req {
-        Ok((offset, data, ack_tx)) => {
-            
-            // write data to all memory nodes
-            for node in &view.memory_nodes {
-                let addr = node.addr_at(offset) as *mut T;
-                if let Err(e) = safe_memio::safe_write(addr, data) {
-                    error!(
-                        "Safe write failed at node {} offset {}: {}",
-                        node.id, offset, e
-                    );
-                    return Err(WriteError::MemoryNodeFailure(node.id));
-                }
-            }
-
-            if let Err(e) = ack_tx.send(true) {
-                    return Err(WriteError::AckSendFailure);
-            }
-        },
-        Err(e) => {
-            match e {
-                mpsc::TryRecvError::Empty => (),
-                mpsc::TryRecvError::Disconnected => {
-                    // warn!("Object queue channel closed: {}", e);
-                    return Err(WriteError::NoMoreClients);
-                }
-            }
+    // write data to all memory nodes
+    for node in &view.memory_nodes {
+        let addr = node.addr_at(offset) as *mut T;
+        if let Err(e) = safe_memio::safe_write(addr, data) {
+            error!(
+                "Safe write failed at node {} offset {}: {}",
+                node.id, offset, e
+            );
+            return Err(WriteError::MemoryNodeFailure(node.id));
         }
     }
 
+    if let Err(_) = ack_tx.send(true) {
+            return Err(WriteError::AckSendFailure);
+    }
+ 
     Ok(())
 }

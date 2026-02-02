@@ -14,7 +14,7 @@ impl WCC {
         }
     }
 
-    fn write(&mut self, round: u64, pid: usize) {
+    pub fn write(&mut self, round: u64, pid: usize) {
         if pid > MAX_PROCESSES {
             return; // invalid pid
         }
@@ -68,7 +68,7 @@ impl WCCMultiObject {
         self.objects_count += 1;
     }
 
-    fn get_object_wcc(&mut self, oid: usize) -> Option<&mut WCC> {
+    pub fn get_object_wcc(&mut self, oid: usize) -> Option<&mut WCC> {
         for i in 0..MAX_OBJECTS {
             if self.index_oids[i] == oid {
                 return Some(&mut self.objects[i]);

@@ -54,10 +54,41 @@ impl GroupView {
     }
 }
 
+pub struct WriteRequest<T> {
+    pub object_id: usize,
+    pub data: T,
+    pub ack_tx: mpsc::Sender<bool>,
+}
+
+impl<T> WriteRequest<T> {
+    pub fn new(object_id: usize, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
+        WriteRequest {
+            object_id,
+            data,
+            ack_tx,
+        }
+    }
+
+    // pub fn default() -> Self
+    // where
+    //     T: Default,
+    // {
+    //     WriteRequest {
+    //         object_id: 0,
+    //         data: T::default(),
+    //         ack_tx: mpsc::channel().0, // dummy sender
+    //     }
+    // }
+
+    pub fn to_tuple(self) -> (usize, T, mpsc::Sender<bool>) {
+        (self.object_id, self.data, self.ack_tx)
+    }
+}
+
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T> {
-    queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
+    queue_tx: mpsc::Sender<WriteRequest<T>>,
     info: ObjectInfo, // could also just store the offset
 }
 
@@ -66,7 +97,7 @@ impl<T> RepCXLObject<T> {
         id: usize,
         offset: usize,
         size: usize,
-        queue: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
+        queue: mpsc::Sender<WriteRequest<T>>,
     ) -> Self {
         RepCXLObject {
             queue_tx: queue,
@@ -93,8 +124,10 @@ impl<T> RepCXLObject<T> {
         // objects in the shmuc_thread or using tokio::sync::oneshot
 
         let (ack_tx, ack_rx) = mpsc::channel();
+        let req = WriteRequest::new(self.info.offset, data, ack_tx);
+        
         self.queue_tx
-            .send((self.info.offset, data, ack_tx))
+            .send(req)
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
 
         // std::thread::sleep(Duration::from_millis(10));
@@ -117,8 +150,8 @@ pub struct RepCXL<T> {
     view: GroupView,
     // objects: HashMap<usize, RepCXLObject>, // id -> object
     round_time: Duration,
-    req_queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
-    req_queue_rx: Option<mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>>,
+    req_queue_tx: mpsc::Sender<WriteRequest<T>>,
+    req_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {

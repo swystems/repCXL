@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::time::{Duration, SystemTime};
 use std::sync::mpsc;
 use log::{error, warn};
@@ -9,13 +10,14 @@ pub fn async_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     _start_time: SystemTime,
     _round_time: Duration,
-    req_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
+    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
 ) {
 
     loop {
         match req_queue_rx.try_recv() {
-            Ok((offset, data, ack_tx)) => {
+            Ok(req) => {
                 // write data to all memory nodes
+                let (offset, data, ack_tx) = req.to_tuple();
                 for node in &view.memory_nodes {
                     let addr = node.addr_at(offset) as *mut T;
                     safe_memio::safe_write(addr, data).unwrap_or_else(|e| {
@@ -48,7 +50,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     start_time: SystemTime,
     round_time: Duration,
-    req_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
+    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
 ) {
     
     let mut round_num = 0;
@@ -64,8 +66,9 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
         );
 
         match req_queue_rx.try_recv() {
-            Ok((offset, data, ack_tx)) => {
+            Ok(req) => {
                 // write data to all memory nodes
+                let (offset, data, ack_tx) = req.to_tuple();
                 for node in &view.memory_nodes {
                     let addr = node.addr_at(offset) as *mut T;
                     safe_memio::safe_write(addr, data).unwrap_or_else(|e| {
