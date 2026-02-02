@@ -1,4 +1,8 @@
 /// LEGACY module OUT OF TREE
+
+const SHMUC_MEMBERSHIP_CHANGE_INTERVAL: u64 = 10; // every N rounds do a membership change
+
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum ShmucRound {
     Init,

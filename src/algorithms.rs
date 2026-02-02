@@ -7,10 +7,10 @@ use crate::GroupView;
 
 
 pub mod best_effort;
+pub mod monster;
 
 // CONFIGURATION
 const ROUND_SLEEP_RATIO: f64 = 0.0; // Percentage of round time to sleep before busy-waiting
-const SHMUC_MEMBERSHIP_CHANGE_INTERVAL: u64 = 10; // every N rounds do a membership change
 const ALGORITHM: &str = "sync_best_effort"; // default algorithm
 
 pub fn from_config<T: Copy + PartialEq + std::fmt::Debug>(    
@@ -27,6 +27,12 @@ pub fn from_config<T: Copy + PartialEq + std::fmt::Debug>(
             req_queue_rx,
         ),
         "sync_best_effort" => best_effort::sync_best_effort(
+            view,
+            st,
+            round_time,
+            req_queue_rx,
+        ),
+        "monster" => monster::monster(
             view,
             st,
             round_time,
@@ -167,4 +173,45 @@ pub fn _write_verify<T: Copy + PartialEq + std::fmt::Debug>(
 
         (round_num, next_round) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
     }
+}
+
+enum WriteError {
+    MemoryNodeFailure(usize), // node id
+    AckSendFailure,
+    NoMoreClients,
+}
+
+fn replicate<T: Copy>(req: Result<(usize, T, mpsc::Sender<bool>), mpsc::TryRecvError>, view: &GroupView) -> Result<(), WriteError> {
+
+    match req {
+        Ok((offset, data, ack_tx)) => {
+            
+            // write data to all memory nodes
+            for node in &view.memory_nodes {
+                let addr = node.addr_at(offset) as *mut T;
+                if let Err(e) = safe_memio::safe_write(addr, data) {
+                    error!(
+                        "Safe write failed at node {} offset {}: {}",
+                        node.id, offset, e
+                    );
+                    return Err(WriteError::MemoryNodeFailure(node.id));
+                }
+            }
+
+            if let Err(e) = ack_tx.send(true) {
+                    return Err(WriteError::AckSendFailure);
+            }
+        },
+        Err(e) => {
+            match e {
+                mpsc::TryRecvError::Empty => (),
+                mpsc::TryRecvError::Disconnected => {
+                    // warn!("Object queue channel closed: {}", e);
+                    return Err(WriteError::NoMoreClients);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
