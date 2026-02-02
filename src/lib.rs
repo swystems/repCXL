@@ -90,7 +90,7 @@ impl<T> RepCXLObject<T> {
 
         // enqueue to coordination thread
         // @TODO: might be expensive to send the channel every time, consider storing the
-        // objects in the shmuc_thread
+        // objects in the shmuc_thread or using tokio::sync::oneshot
 
         let (ack_tx, ack_rx) = mpsc::channel();
         self.queue_tx
@@ -117,8 +117,8 @@ pub struct RepCXL<T> {
     view: GroupView,
     // objects: HashMap<usize, RepCXLObject>, // id -> object
     round_time: Duration,
-    obj_queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
-    obj_queue_rx: Option<mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>>,
+    req_queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
+    req_queue_rx: Option<mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -142,8 +142,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             num_of_objects: 0,
             view,
             round_time,
-            obj_queue_tx: tx,
-            obj_queue_rx: Some(rx),
+            req_queue_tx: tx,
+            req_queue_rx: Some(rx),
         }
     }
 
@@ -206,6 +206,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             return None;
         }
 
+        if !self.is_coordinator() {
+            warn!("Only the coordinator can create new objects");
+            return None;
+        }
+
         let size = std::mem::size_of::<T>(); // padded and aligned
 
         let mut state = self.read_state_from_any().unwrap();
@@ -219,7 +224,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 }
 
                 // clone the object transmission queue
-                let tx = self.obj_queue_tx.clone();
+                let tx = self.req_queue_tx.clone();
                 // create the new RepCXLObject
                 let obj = RepCXLObject::new(id, offset, size, tx);
 
@@ -231,13 +236,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 return None;
             }
         }
-
-        // self.objects.insert(
-        //     id,
-        //     RepCXLObject::new(id, offset, size, self.obj_queue_tx.clone()),
-        // );
-
-        // self.objects.get(&id)
     }
 
     pub fn remove_object(&mut self, id: usize) {
@@ -253,11 +251,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Attempt to get an object reference by its ID first in the local cache
     /// and then in the shared state.
     pub fn get_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
-        // if self.objects.contains_key(&id) {
-        //     debug!("object found in repcxl local cache");
-        //     return self.objects.get(&id);
-        // }
-
         // info!(
         //     "Object with id {} not found in cache, looking in shared state",
         //     id
@@ -267,18 +260,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         if let Some(oi) = state.allocator.lookup_object(id) {
             info!("Object found in shared state");
-            let obj = RepCXLObject::new(id, oi.offset, oi.size, self.obj_queue_tx.clone());
+            let obj = RepCXLObject::new(id, oi.offset, oi.size, self.req_queue_tx.clone());
             return Some(obj);
-            // self.objects.insert(
-            //     id,
-            //     RepCXLObject {
-            //         id,
-            //         addresses,
-            //         size: oe.size,
-            //     },
-            // );
-
-            // return self.objects.get(&id);
         }
         None
     }
@@ -326,9 +309,9 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // create object queue channel: move the receiver to the thread
             // and keep the sender in state to assign to new objects
             // let (tx, rx) = mpsc::channel();
-            let rx = self.obj_queue_rx.take().expect("Receiver already taken");
+            let rx = self.req_queue_rx.take().expect("Receiver already taken");
             std::thread::spawn(move || {
-                algorithms::best_effort::async_best_effort(v, start_time, rt, rx);
+                algorithms::from_config(v, start_time, rt, rx);
             });
 
             // block until after start time

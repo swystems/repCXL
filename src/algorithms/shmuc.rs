@@ -81,7 +81,7 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     start_time: SystemTime,
     round_time: Duration,
-    obj_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
+    req_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
 ) {
     let mut round_num = 0;
 
@@ -106,7 +106,7 @@ pub fn shmuc<T: Copy + PartialEq + std::fmt::Debug>(
                 debug!("Write round");
 
                 // try to pop an object from the queue
-                match obj_queue_rx.try_recv() {
+                match req_queue_rx.try_recv() {
                     Ok((offset, data, ack_tx)) => {
                         // WCC check. We use the offset as request ID
                         wcc.push_request(offset, view.self_id);

@@ -1,14 +1,42 @@
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
 use crate::safe_memio;
+use crate::GroupView;
 
 
 pub mod best_effort;
+
 // CONFIGURATION
 const ROUND_SLEEP_RATIO: f64 = 0.0; // Percentage of round time to sleep before busy-waiting
 const SHMUC_MEMBERSHIP_CHANGE_INTERVAL: u64 = 10; // every N rounds do a membership change
+const ALGORITHM: &str = "sync_best_effort"; // default algorithm
+
+pub fn from_config<T: Copy + PartialEq + std::fmt::Debug>(    
+    view: GroupView,
+    st: SystemTime,
+    round_time: Duration,
+    req_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
+) {
+    match ALGORITHM {
+        "async_best_effort" => best_effort::async_best_effort(
+            view,
+            st,
+            round_time,
+            req_queue_rx,
+        ),
+        "sync_best_effort" => best_effort::sync_best_effort(
+            view,
+            st,
+            round_time,
+            req_queue_rx,
+        ),
+        _ => {
+            panic!("Unknown algorithm, check config: {}", ALGORITHM);
+        }
+    }
+}
 
 /// Wait until the specified start time, sleeping for a portion of the time and busy-waiting for the rest
 pub fn wait_start_time(start_time: SystemTime, sleep_ratio: f64) {
@@ -85,7 +113,7 @@ pub fn _write_verify<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     start_time: SystemTime,
     round_time: Duration,
-    obj_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
+    req_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
 ) {
     let mut round_num = 0;
     // wait to start
@@ -99,7 +127,7 @@ pub fn _write_verify<T: Copy + PartialEq + std::fmt::Debug>(
             SystemTime::now().duration_since(next_round).unwrap()
         );
 
-        match obj_queue_rx.try_recv() {
+        match req_queue_rx.try_recv() {
             Ok((offset, data, ack_tx)) => {
                 // write data to all memory nodes
                 let mut success = true;
