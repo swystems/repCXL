@@ -141,7 +141,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             chunk_size,
             num_of_objects: 0,
             view,
-            // objects: HashMap::new(),
             round_time,
             obj_queue_tx: tx,
             obj_queue_rx: Some(rx),
@@ -179,7 +178,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         Err("Could not read state from any memory node!")
     }
 
-    // Get a mutable reference to the starting block from the master node
+    // Get a mutable reference to the starting block from the master memory node
     fn get_state_from_master(&self) -> Result<&mut SharedState, &str> {
         if let Some(master) = self.view.get_master_node() {
             let state = master.get_state();

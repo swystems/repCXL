@@ -8,11 +8,11 @@ use std::time::{Duration, Instant};
 
 // CONFIG
 const NODE_PATHS: [&str; 3] = [
-    "/dev/shm/repCXL_test0",
     "/dev/shm/repCXL_test1",
     "/dev/shm/repCXL_test2",
+    "/dev/shm/repCXL_test3",
 ];
-const MEMORY_SIZE: usize = 100 * 1024 * 1024; // 100 MiB
+const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
 
@@ -73,10 +73,10 @@ fn main() {
                 .value_parser(value_parser!(u32)),
         )
         .arg(
-            Arg::new("threads")
-                .short('t')
-                .long("threads")
-                .help("Number of threads (rep_cxl instances issuing requests) for the current node. Must be the same for all COMPUTE_NODES")
+            Arg::new("clients")
+                .short('c')
+                .long("clients")
+                .help("Number of clients (rep_cxl instances issuing requests) for the current node. Must be the same for all COMPUTE_NODES")
                 .default_value(DEFAULT_CLIENTS)
                 .value_parser(value_parser!(u32)),
         )
@@ -102,25 +102,26 @@ fn main() {
     }
 
     let attempts = matches.get_one::<u32>("attempts").unwrap().clone();
-    let threads = matches.get_one::<u32>("threads").unwrap().clone();
+    let clients = matches.get_one::<u32>("clients").unwrap().clone();
     let num_of_objects = matches.get_one::<usize>("objects").unwrap().clone();
 
 
     let round_time = Duration::from_nanos(round_time_ns);
 
     let mut client_handles = Vec::new();
-    let total_processes = threads * nodes;
+    let total_processes = clients * nodes;
 
     // init metrics vectors
     let (lats_tx, lats_rx) = std::sync::mpsc::channel();
     let (tput_tx, tput_rx) = std::sync::mpsc::channel();
-    for c in 0..threads {   
+    for c in 0..clients {   
         let lats_tx = lats_tx.clone();
         let tput_tx = tput_tx.clone();
+
         let handle = std::thread::spawn(move || {
             // assign incremental ids depending on the node
-            // assumes that all COMPUTE_NODES have the same number of threads
-            let rcxl_id = node_id * threads + c;
+            // assumes that all COMPUTE_NODES have the same number of clients
+            let rcxl_id = node_id * clients + c;
             debug!("Starting RepCXL instance with id {}", rcxl_id);
             let mut rcxl =
                 RepCXL::<u64>::new(rcxl_id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
@@ -165,10 +166,11 @@ fn main() {
 
             // rcxl.dump_states();
 
-            rcxl.sync_start();
-
             let mut lats = Vec::new();
             let mut rng = rand::rng();
+            
+            
+            rcxl.sync_start();
 
             let total_start = Instant::now();
             for _ in 0..attempts {
@@ -187,6 +189,7 @@ fn main() {
             lats_tx.send(lats).unwrap();
             tput_tx.send(attempts as f64 / total_elapsed_s).unwrap();
         }); // end of thread body
+
         client_handles.push(handle);
     }
 

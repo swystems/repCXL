@@ -15,7 +15,7 @@ impl WCC {
     }
 
     fn write(&mut self, round: u64, pid: usize) {
-        if pid < 0 || pid > MAX_PROCESSES {
+        if pid > MAX_PROCESSES {
             return; // invalid pid
         }
         self.p_round[pid] = round;
@@ -27,7 +27,7 @@ impl WCC {
     /// the current round
     /// - in case of conflicts, the smallest pid wins
     fn is_last(&self, current_round:u64, round: u64, pid: usize) -> bool {
-        if pid < 0 || pid > MAX_PROCESSES {
+        if pid > MAX_PROCESSES {
             return false; // invalid pid
         }
 
