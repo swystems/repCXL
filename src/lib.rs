@@ -87,12 +87,12 @@ impl<T> WriteRequest<T> {
 
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
-pub struct RepCXLObject<T> {
+pub struct RepCXLObject<T: Copy> {
     queue_tx: mpsc::Sender<WriteRequest<T>>,
     info: ObjectInfo, // could also just store the offset
 }
 
-impl<T> RepCXLObject<T> {
+impl<T: Copy> RepCXLObject<T> {
     pub fn new(
         id: usize,
         offset: usize,
@@ -229,7 +229,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     }
 
     /// Attempts to create a new shared, replicated object of type T across
-    /// all memory nodes.
+    /// all memory nodes. 
     ///
     /// # Arguments
     /// * `id` - Unique identifier for the object.
@@ -248,7 +248,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         let mut state = self.read_state_from_any().unwrap();
 
-        // try to alloc object
+        // try to alloc object 
         match state.allocator.alloc_object(id, size) {
             Some(offset) => {
                 for node in &self.view.memory_nodes {
@@ -303,7 +303,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// **assumes sync'ed clocks**
     /// All processes must call this function with the same group view to
     /// ensure consistency.
-    pub fn sync_start(&mut self) {
+    pub fn sync_start(&mut self, algorithm: String) {
         if let Some(coord) = self.view.get_coordinator() {
             let mstate = self.get_state_from_master().unwrap();
             let sblock = mstate.get_starting_block();
@@ -344,7 +344,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // let (tx, rx) = mpsc::channel();
             let rx = self.req_queue_rx.take().expect("Receiver already taken");
             std::thread::spawn(move || {
-                algorithms::from_config(v, start_time, rt, rx);
+                algorithms::from_string(algorithm)(v, start_time, rt, rx);
             });
 
             // block until after start time

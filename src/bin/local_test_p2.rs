@@ -50,7 +50,7 @@ fn main() {
 
     // rcxl.remove_object::<String>(100);
 
-    rcxl.sync_start();
+    rcxl.sync_start("sync_best_effort".to_string());
 
     std::thread::sleep(std::time::Duration::from_secs(1));
 

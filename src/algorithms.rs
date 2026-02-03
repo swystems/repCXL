@@ -1,5 +1,4 @@
 use log::{debug, error, warn};
-use std::fmt::Write;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
@@ -13,15 +12,15 @@ pub mod monster;
 
 // CONFIGURATION
 const ROUND_SLEEP_RATIO: f64 = 0.0; // Percentage of round time to sleep before busy-waiting
-const ALGORITHM: &str = "sync_best_effort"; // default algorithm
+const _ALGORITHM: &str = "sync_best_effort"; // default algorithm
 
-pub fn from_config<T: Copy + PartialEq + std::fmt::Debug>(    
+pub fn _from_global<T: Copy + PartialEq + std::fmt::Debug>(    
     view: GroupView,
     st: SystemTime,
     round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
 ) {
-    match ALGORITHM {
+    match _ALGORITHM {
         "async_best_effort" => best_effort::async_best_effort(
             view,
             st,
@@ -41,8 +40,24 @@ pub fn from_config<T: Copy + PartialEq + std::fmt::Debug>(
             req_queue_rx,
         ),
         _ => {
-            panic!("Unknown algorithm, check config: {}", ALGORITHM);
+            panic!("Unknown algorithm, check config: {}", _ALGORITHM);
         }
+    }
+}
+
+pub fn from_string<T: Copy + PartialEq + std::fmt::Debug>(
+    algorithm: String,
+) -> fn(
+    GroupView,
+    SystemTime,
+    Duration,
+    mpsc::Receiver<WriteRequest<T>>,
+) {
+    match algorithm.as_str() {
+        "async_best_effort" => best_effort::async_best_effort,
+        "sync_best_effort" => best_effort::sync_best_effort,
+        "monster" => monster::monster,
+        _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }
 
@@ -203,3 +218,4 @@ fn replicate<T: Copy>(req: WriteRequest<T>, view: &GroupView) -> Result<(), Writ
  
     Ok(())
 }
+

@@ -1,4 +1,3 @@
-use crate::shmem::wcc::WCC;
 
 use super::*;
 
@@ -11,35 +10,6 @@ enum MonsterState {
     PostConflictCheck,
 }
 
-// struct MonsterStateMachine {
-//     state: MonsterState,
-// }
-
-// impl MonsterStateMachine {
-//     fn new() -> Self {
-//         MonsterStateMachine {
-//             state: MonsterState::Init,
-//         }
-//     }
-
-//     fn next(&mut self) -> MonsterState {
-    
-
-//         self.state = match self.state {
-//             MonsterState::Init => MonsterState::Try,
-//             MonsterState::Try => MonsterState::Check,
-//             MonsterState::Check => MonsterState::Replicate,
-//             MonsterState::Replicate => MonsterState::Wait,
-//             MonsterState::Wait => MonsterState::PostConflictCheck,
-//             MonsterState::PostConflictCheck => MonsterState::Try,
-//         };
-
-//         self.state
-//     }
-// }
-
-
-
 pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     start_time: SystemTime,
@@ -49,40 +19,38 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
     let mut round_num = 0;
     let mut monster_state = MonsterState::Try;
 
-    // MONSTER vars
-    let mut wcc= &mut WCC::new(); // empty WCC for initialization
+    // MONSTER loop vars
     let mut pending_req = None; // pending write request
     let mut wid = (0,0);
+    let mut oid = 0;
 
     // get shared write conflict checker
     let mnode_state = view.get_master_node().unwrap().get_state();
-    let wcc_mo = mnode_state.get_wcc_mo();
+    let owcc = mnode_state.get_owcc();
 
     // wait to start
-    let mut next_round = start_time;
+    let mut round_start = start_time;
     wait_start_time(start_time, ROUND_SLEEP_RATIO);
 
     loop {
         debug!(
-            "Round #{round_num}, delay {:?}",
-            SystemTime::now().duration_since(next_round).unwrap()
+            "Round #{round_num}, delay {:?}, phase: {:?}",
+            SystemTime::now().duration_since(round_start).unwrap(),
+            monster_state
         );
 
         match monster_state {
             MonsterState::Try => {
                 match req_queue_rx.try_recv() {
                     Ok(req) => {
-                        if let Some(wcc_ref) = wcc_mo.get_object_wcc(req.object_id) { // @TODO optimize EXTRA MEM ACCESS!
-                            wcc = wcc_ref;
-                            wid = (round_num, view.self_id);
-                            wcc.write(round_num, view.self_id);
-                            monster_state = MonsterState::Check;
+                        wid = (round_num, view.self_id);
+                        oid = req.object_id;
+                        owcc.write(oid, round_num, view.self_id);
+                        monster_state = MonsterState::Check;
 
-                            pending_req = Some(req);
+                        pending_req = Some(req);
 
-                        } else {
-                            error!("Object {} not found in WCC", req.object_id);
-                        }
+                        
                     },
                     Err(e) => match e {
                         mpsc::TryRecvError::Empty => {
@@ -97,10 +65,22 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
             },
             
             MonsterState::Check => {
-                wcc.is_last(round_num, wid.0 , wid.1);
-                
-                
-                monster_state = MonsterState::Replicate;
+                if owcc.is_last(oid, round_num, wid.0, wid.1) {
+                    // current process is the last writer
+                    debug!("Process {} is the last writer for object {} in round {}", view.self_id, oid, round_num);
+
+                    if SystemTime::now().duration_since(round_start).unwrap() < round_time {
+                        // on time, proceed to Replicate state
+                        monster_state = MonsterState::Replicate;
+                    } else {
+                        // overtime (sync failure), wait for next round
+                        monster_state = MonsterState::Check;
+                    }
+                }
+                else {
+                    // not the last writer
+                    monster_state = MonsterState::Wait;
+                }
             },
 
             MonsterState::Replicate => {
@@ -127,11 +107,16 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
 
                 pending_req = None;
             },
-            MonsterState::Wait => {},
-            MonsterState::PostConflictCheck => {}
+            MonsterState::Wait => {
+                monster_state = MonsterState::PostConflictCheck;
+            },
+            MonsterState::PostConflictCheck => {
+                // TODO: implement post-conflict check logic
+                monster_state = MonsterState::Try;
+            }
         }
 
-        (round_num, next_round) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
+        (round_num, round_start) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
 
     }
 }

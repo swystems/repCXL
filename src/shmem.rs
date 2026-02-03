@@ -10,7 +10,7 @@ use allocator::Allocator;
 mod starting_block;
 use starting_block::StartingBlock;
 pub mod wcc;
-use wcc::WCCMultiObject;
+use wcc::ObjectWCC;
 
 
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
@@ -21,7 +21,7 @@ const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 pub(crate) struct SharedState {
     pub(crate) allocator: Allocator,
     starting_block: StartingBlock,
-    wcc_mo: WCCMultiObject,
+    owcc: ObjectWCC,
 }
 
 impl SharedState {
@@ -29,7 +29,7 @@ impl SharedState {
         SharedState {
             allocator: Allocator::new(total_size, chunk_size),
             starting_block: StartingBlock::new(),
-            wcc_mo: WCCMultiObject::new(),
+            owcc: ObjectWCC::new(),
         }
     }
 
@@ -37,8 +37,8 @@ impl SharedState {
         &mut self.starting_block
     }
 
-    pub(crate) fn get_wcc_mo(&mut self) -> &mut WCCMultiObject {
-        &mut self.wcc_mo
+    pub(crate) fn get_owcc(&mut self) -> &mut ObjectWCC {
+        &mut self.owcc
     }
 }
 
@@ -62,7 +62,7 @@ impl MemoryNode {
             panic!("Size must be greater than SharedState size:\n\tAllocator: {}\n\tstarting_block: {}\n\twcc_mo: {}", 
                 std::mem::size_of::<Allocator>(), 
                 std::mem::size_of::<StartingBlock>(), 
-                std::mem::size_of::<WCCMultiObject>()
+                std::mem::size_of::<ObjectWCC>()
             );
         }
 

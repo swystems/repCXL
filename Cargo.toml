@@ -2,9 +2,7 @@
 name = "rep_cxl"
 version = "0.1.0"
 edition = "2021"
-default-run = "rep_cxl"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+default-run = "rep_bench"
 
 [dependencies]
 clap = "4.5.44"

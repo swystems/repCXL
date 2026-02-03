@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::{MAX_OBJECTS, MAX_PROCESSES};
 
 /// Write Conflict Checker (WCC) register to solve write conflicts
@@ -15,7 +16,7 @@ impl WCC {
     }
 
     pub fn write(&mut self, round: u64, pid: usize) {
-        if pid > MAX_PROCESSES {
+        if pid >= MAX_PROCESSES {  
             return; // invalid pid
         }
         self.p_round[pid] = round;
@@ -79,5 +80,68 @@ impl WCCMultiObject {
 
     pub(crate) fn clear(&mut self) {
         self.objects = [WCC::new(); MAX_OBJECTS];
+    }
+}
+
+
+/// entry for ObjectWCC
+/// contains object ID, round
+#[derive(Debug, Clone, Copy)]
+struct ObjectWCCEntry {
+    oid: usize,
+    round: u64,
+}
+
+impl ObjectWCCEntry {
+    pub fn new(oid: usize, round: u64) -> Self {
+        ObjectWCCEntry { oid, round }
+    }
+}
+
+/// multi-object WCC with smaller memory footprint
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObjectWCC {
+    p_round: [ObjectWCCEntry; MAX_PROCESSES] // array of ObjectWCCEntry indexed by process ID
+}
+
+impl ObjectWCC {
+    pub fn new() -> Self {
+        ObjectWCC {
+            p_round: [ObjectWCCEntry::new(0, 0); MAX_PROCESSES],
+        }
+    }
+
+    pub fn write(&mut self, oid: usize, round: u64, pid: usize) {
+        if pid >= MAX_PROCESSES {  
+            return; // invalid pid
+        }
+        self.p_round[pid] = ObjectWCCEntry::new(oid, round);
+    }
+
+    /// Check if the given process is the last writer for the given object.
+    /// 
+    /// Last writer criteria: 
+    /// - the winning process has written in the largest round smaller than
+    /// the current round
+    /// - in case of conflicts, the smallest pid wins
+    pub fn is_last(&self, oid_in: usize, current_round:u64, round_in: u64, pid_in: usize) -> bool {
+        if pid_in > MAX_PROCESSES {
+            return false; // invalid pid
+        }
+
+        for i in 0..MAX_PROCESSES {
+            // check only entries for the same object ID
+            if self.p_round[i].oid != oid_in {
+                continue;
+            }
+
+            if current_round > self.p_round[i].round && self.p_round[i].round > round_in {
+                return false; // another process has written in a larger round
+            }
+            if self.p_round[i].round == round_in && i < pid_in {
+                return false; // another process has lower pid
+            }
+        }
+        true
     }
 }

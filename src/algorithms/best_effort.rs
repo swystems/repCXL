@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::time::{Duration, SystemTime};
 use std::sync::mpsc;
 use log::{error, warn};
