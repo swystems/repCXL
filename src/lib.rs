@@ -55,15 +55,15 @@ impl GroupView {
 }
 
 pub struct WriteRequest<T> {
-    pub object_id: usize,
+    pub obj_info: ObjectInfo,
     pub data: T,
     pub ack_tx: mpsc::Sender<bool>,
 }
 
 impl<T> WriteRequest<T> {
-    pub fn new(object_id: usize, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
+    pub fn new(obj_info: ObjectInfo, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
         WriteRequest {
-            object_id,
+            obj_info,
             data,
             ack_tx,
         }
@@ -80,8 +80,8 @@ impl<T> WriteRequest<T> {
     //     }
     // }
 
-    pub fn to_tuple(self) -> (usize, T, mpsc::Sender<bool>) {
-        (self.object_id, self.data, self.ack_tx)
+    pub fn to_tuple(self) -> (ObjectInfo, T, mpsc::Sender<bool>) {
+        (self.obj_info, self.data, self.ack_tx)
     }
 }
 
@@ -106,30 +106,13 @@ impl<T: Copy> RepCXLObject<T> {
     }
 
     pub fn write(&self, data: T) -> Result<(), String> {
-        // check size matches
-        // currently broken because non coordinator will read the chunk size of T
-        // from the shared state, which is likely more than the actual size of T
-        // @TODO: fix
-        // if std::mem::size_of_val(&data) != self.info.size {
-        //     debug!(
-        //         "data size: {}, object size: {}",
-        //         std::mem::size_of_val(&data),
-        //         self.info.size
-        //     );
-        //     return Err("Data size does not match object size");
-        // }
-
-        // enqueue to coordination thread
-        // @TODO: might be expensive to send the channel every time, consider storing the
-        // objects in the shmuc_thread or using tokio::sync::oneshot
-
+        
         let (ack_tx, ack_rx) = mpsc::channel();
-        let req = WriteRequest::new(self.info.offset, data, ack_tx);
+        let req = WriteRequest::new(self.info, data, ack_tx);
         
         self.queue_tx
             .send(req)
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
-
         // std::thread::sleep(Duration::from_millis(10));
         // wait for ack
         match ack_rx.recv() {
@@ -148,7 +131,6 @@ pub struct RepCXL<T> {
     chunk_size: usize, // Size of each chunk in bytes
     num_of_objects: usize,
     view: GroupView,
-    // objects: HashMap<usize, RepCXLObject>, // id -> object
     round_time: Duration,
     req_queue_tx: mpsc::Sender<WriteRequest<T>>,
     req_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,

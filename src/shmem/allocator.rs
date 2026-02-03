@@ -3,9 +3,9 @@ use log::{info, warn};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ObjectInfo {
-    id: usize,
+    pub(crate) id: usize,
     pub(crate) offset: usize,
-    pub size: usize,
+    pub(crate) size: usize,
 }
 
 impl ObjectInfo {

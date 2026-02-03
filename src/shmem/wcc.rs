@@ -5,7 +5,7 @@ use crate::{MAX_OBJECTS, MAX_PROCESSES};
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct WCC {
     // array of round values indexed by process ID
-    p_round: ([u64; MAX_PROCESSES])
+    p_round: [u64; MAX_PROCESSES]
 }
 
 impl WCC {

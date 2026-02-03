@@ -21,8 +21,8 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
 
     // MONSTER loop vars
     let mut pending_req = None; // pending write request
-    let mut wid = (0,0);
-    let mut oid = 0;
+    let mut wid = (0,0); // write request id
+    let mut oid = 0; // object id
 
     // get shared write conflict checker
     let mnode_state = view.get_master_node().unwrap().get_state();
@@ -34,9 +34,10 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
 
     loop {
         debug!(
-            "Round #{round_num}, delay {:?}, phase: {:?}",
+            "Round #{round_num}, delay {:?}, phase: {:?}, obj id: {}",
             SystemTime::now().duration_since(round_start).unwrap(),
-            monster_state
+            monster_state,
+            oid
         );
 
         match monster_state {
@@ -44,7 +45,7 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
                 match req_queue_rx.try_recv() {
                     Ok(req) => {
                         wid = (round_num, view.self_id);
-                        oid = req.object_id;
+                        oid = req.obj_info.id;
                         owcc.write(oid, round_num, view.self_id);
                         monster_state = MonsterState::Check;
 
@@ -90,7 +91,8 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
                     break;
                 }
 
-                match replicate(pending_req.unwrap(), &view) {
+                
+                match mem_writeall(pending_req.unwrap(), &view) {
                     Ok(()) => {
                         monster_state = MonsterState::Try;
                     },
@@ -112,6 +114,7 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
             },
             MonsterState::PostConflictCheck => {
                 // TODO: implement post-conflict check logic
+
                 monster_state = MonsterState::Try;
             }
         }
