@@ -1,6 +1,4 @@
-use std::fmt::Write;
-
-use crate::shmem::MemoryNode;
+use crate::shmem::wcc::WCC;
 
 use super::*;
 
@@ -10,7 +8,7 @@ enum MonsterState {
     Check,
     Replicate,
     Wait,
-    PostConflictCheck
+    PostConflictCheck,
 }
 
 // struct MonsterStateMachine {
@@ -51,9 +49,10 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
     let mut round_num = 0;
     let mut monster_state = MonsterState::Try;
 
-    // loop mut vars
-    let mut wcc;
-    let mut pending_req = WriteRequest::default(); // pending write request
+    // MONSTER vars
+    let mut wcc= &mut WCC::new(); // empty WCC for initialization
+    let mut pending_req = None; // pending write request
+    let mut wid = (0,0);
 
     // get shared write conflict checker
     let mnode_state = view.get_master_node().unwrap().get_state();
@@ -73,11 +72,14 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
             MonsterState::Try => {
                 match req_queue_rx.try_recv() {
                     Ok(req) => {
-                        pending_req = req;
                         if let Some(wcc_ref) = wcc_mo.get_object_wcc(req.object_id) { // @TODO optimize EXTRA MEM ACCESS!
                             wcc = wcc_ref;
+                            wid = (round_num, view.self_id);
                             wcc.write(round_num, view.self_id);
                             monster_state = MonsterState::Check;
+
+                            pending_req = Some(req);
+
                         } else {
                             error!("Object {} not found in WCC", req.object_id);
                         }
@@ -93,10 +95,22 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
                     }
                 }
             },
-            MonsterState::Check => {},
+            
+            MonsterState::Check => {
+                wcc.is_last(round_num, wid.0 , wid.1);
+                
+                
+                monster_state = MonsterState::Replicate;
+            },
+
             MonsterState::Replicate => {
 
-                match replicate(pending_req, &view) {
+                if let None = pending_req {
+                    error!("No pending request in Replicate state, disallowed state. Exiting.");
+                    break;
+                }
+
+                match replicate(pending_req.unwrap(), &view) {
                     Ok(()) => {
                         monster_state = MonsterState::Try;
                     },
@@ -110,6 +124,8 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
                             },
                     }
                 }
+
+                pending_req = None;
             },
             MonsterState::Wait => {},
             MonsterState::PostConflictCheck => {}

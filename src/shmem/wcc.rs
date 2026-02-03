@@ -8,7 +8,7 @@ pub(crate) struct WCC {
 }
 
 impl WCC {
-    fn new() -> Self {
+    pub fn new() -> Self {
         WCC {
             p_round: [0; MAX_PROCESSES],
         }
@@ -26,7 +26,7 @@ impl WCC {
     /// - the winning process has written in the highest round smaller than
     /// the current round
     /// - in case of conflicts, the smallest pid wins
-    fn is_last(&self, current_round:u64, round: u64, pid: usize) -> bool {
+    pub fn is_last(&self, current_round:u64, round: u64, pid: usize) -> bool {
         if pid > MAX_PROCESSES {
             return false; // invalid pid
         }
