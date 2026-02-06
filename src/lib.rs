@@ -3,6 +3,7 @@
 /// all machines.
 use log::{debug, error, info, warn};
 
+use std::hash::Hash;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -96,7 +97,7 @@ impl<T: Copy> RepCXLObject<T> {
 
     pub fn write(&self, data: T) -> Result<(), String> {
         let (ack_tx, ack_rx) = mpsc::channel();
-        let req = WriteRequest::new(self.info, data, ack_tx);
+        let req = WriteRequest::new(self.info, data, ack_tx);ObjectMemoryEntry
 
         self.req_queue_tx
             .send(req)
@@ -140,6 +141,13 @@ impl Ord for Wid {
             std::cmp::Ordering::Less => std::cmp::Ordering::Less,
             std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id),
         }
+    }
+}
+
+impl Hash for Wid {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.round_num.hash(state);
+        self.process_id.hash(state);
     }
 }
 
