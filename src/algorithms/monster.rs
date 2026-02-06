@@ -1,5 +1,6 @@
-
 use super::*;
+use crate::Wid;
+use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum MonsterState {
@@ -21,7 +22,7 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
 
     // MONSTER loop vars
     let mut pending_req = None; // pending write request
-    let mut wid = (0,0); // write request id
+    let mut wid = Wid::new(0,0); // write request id
     let mut oid = 0; // object id
 
     // get shared write conflict checker
@@ -44,7 +45,7 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
             MonsterState::Try => {
                 match req_queue_rx.try_recv() {
                     Ok(req) => {
-                        wid = (round_num, view.self_id);
+                        wid = Wid::new(round_num, view.self_id);
                         oid = req.obj_info.id;
                         owcc.write(oid, round_num, view.self_id);
                         monster_state = MonsterState::Check;
@@ -66,7 +67,7 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
             },
             
             MonsterState::Check => {
-                if owcc.is_last(oid, round_num, wid.0, wid.1) {
+                if owcc.is_last(oid, round_num, wid.round_num, wid.process_id) {
                     // current process is the last writer
                     debug!("Process {} is the last writer for object {} in round {}", view.self_id, oid, round_num);
 
@@ -90,21 +91,24 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
                     error!("No pending request in Replicate state, disallowed state. Exiting.");
                     break;
                 }
-
                 
-                match mem_writeall(pending_req.unwrap(), &view) {
+                let req = pending_req.unwrap();
+                let ome = ObjectMemoryEntry::new(wid, req.data);
+                
+                match mem_writeall(req.obj_info.offset, ome, &view.memory_nodes) {
                     Ok(()) => {
+                        // send ack to client
+                        if let Err(_) = req.ack_tx.send(true) {
+                            error!("Failed to send ack");
+                        }
+
                         monster_state = MonsterState::Try;
                     },
-                    Err(e) => match e {
-                        WriteError::MemoryNodeFailure(id) => {
-                            error!("Memory node {} failed during write replication", id);
-                            break;
-                            },
-                        WriteError::AckSendFailure => {
-                                error!("Failed to send ack");
-                            },
+                    Err(MemoryError(memory_node_id)) => {
+                        error!("Memory node {} failed during write replication", memory_node_id);
+                        break;
                     }
+
                 }
 
                 pending_req = None;

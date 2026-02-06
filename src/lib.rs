@@ -55,13 +55,13 @@ impl GroupView {
 }
 
 pub struct WriteRequest<T> {
-    pub obj_info: ObjectInfo,
+    pub(crate) obj_info: ObjectInfo,
     pub data: T,
     pub ack_tx: mpsc::Sender<bool>,
 }
 
 impl<T> WriteRequest<T> {
-    pub fn new(obj_info: ObjectInfo, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
+    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
         WriteRequest {
             obj_info,
             data,
@@ -69,7 +69,7 @@ impl<T> WriteRequest<T> {
         }
     }
 
-    pub fn to_tuple(self) -> (ObjectInfo, T, mpsc::Sender<bool>) {
+    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, mpsc::Sender<bool>) {
         (self.obj_info, self.data, self.ack_tx)
     }
 }
@@ -154,15 +154,22 @@ impl Wid {
 
 /// ObjectMemoryEntry. Stores the current write ID and the value of the object 
 /// in memory.
-// #[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct ObjectMemoryEntry<T> {
     wid: Wid,
     value: T,
 }
 
-impl<T> ObjectMemoryEntry<T> {
+impl<T: Copy> ObjectMemoryEntry<T> {
     pub fn new(wid: Wid, value: T) -> Self {
         ObjectMemoryEntry { wid, value }
+    }
+
+    pub fn new_nowid(value: T) -> Self {
+        ObjectMemoryEntry {
+            wid: Wid::new(0, 0),
+            value,
+        }
     }
 }
 

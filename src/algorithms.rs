@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use crate::safe_memio;
 use crate::GroupView;
 use crate::WriteRequest;
-use crate::shmem::object_index::ObjectInfo;
+use crate::ObjectMemoryEntry;
 
 
 pub mod best_effort;
@@ -193,54 +193,4 @@ pub fn _write_verify<T: Copy + PartialEq + std::fmt::Debug>(
     }
 }
 
-enum WriteError {
-    MemoryNodeFailure(usize), // node id
-    AckSendFailure,
-}
 
-
-
-/// Write the value in WriteRequest to its object in all memory nodes and send 
-/// an ACK back to the requesting process if successful.
-fn mem_writeall<T: Copy>(req: WriteRequest<T>, view: &GroupView) -> Result<(), WriteError> {
-    let (obj_info, data, ack_tx) = req.to_tuple();
-    let offset = obj_info.offset;
-
-    // write data to all memory nodes
-    for node in &view.memory_nodes {
-        let addr = node.addr_at(offset) as *mut T;
-        if let Err(e) = safe_memio::safe_write(addr, data) {
-            error!(
-                "Safe write failed object id {} at node {} offset {}: {}",
-                obj_info.id, node.id, offset, e
-            );
-            return Err(WriteError::MemoryNodeFailure(node.id));
-        }
-    }
-
-    if let Err(_) = ack_tx.send(true) {
-            return Err(WriteError::AckSendFailure);
-    }
- 
-    Ok(())
-}
-
-
-/// Read the value from all memory nodes for the given object
-fn mem_readall<T: Copy>(obj_info: ObjectInfo, view: &GroupView) -> Result<Vec<T>, WriteError> {
-    let mut states = Vec::new();
-    for node in &view.memory_nodes {
-        let addr = node.addr_at(obj_info.offset) as *mut T;
-        match safe_memio::safe_read(addr) {
-            Ok(data) => states.push(data),
-            Err(e) => {
-                error!(
-                    "Safe read failed. Node {}, object id {} offset {}: {}",
-                    node.id, obj_info.id, obj_info.offset, e
-                );
-                return Err(WriteError::MemoryNodeFailure(node.id));
-            }
-        }
-    }
-    Ok(states)
-}

@@ -16,13 +16,14 @@ pub fn async_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
         match req_queue_rx.try_recv() {
             Ok(req) => {
                 // write data to all memory nodes
-                let (offset, data, ack_tx) = req.to_tuple();
+                let (oi, data, ack_tx) = req.to_tuple();
                 for node in &view.memory_nodes {
-                    let addr = node.addr_at(offset) as *mut T;
-                    safe_memio::safe_write(addr, data).unwrap_or_else(|e| {
+                    let addr = node.addr_at(oi.offset) as *mut ObjectMemoryEntry<T>;
+                    let entry = ObjectMemoryEntry::new_nowid(data);
+                    safe_memio::safe_write(addr, entry).unwrap_or_else(|e| {
                         error!(
                             "Safe write failed at node {} offset {}: {}",
-                            node.id, offset, e
+                            node.id, oi.offset, e
                         );
                     });
                 }
@@ -67,13 +68,14 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
         match req_queue_rx.try_recv() {
             Ok(req) => {
                 // write data to all memory nodes
-                let (offset, data, ack_tx) = req.to_tuple();
+                let (oi, data, ack_tx) = req.to_tuple();
                 for node in &view.memory_nodes {
-                    let addr = node.addr_at(offset) as *mut T;
-                    safe_memio::safe_write(addr, data).unwrap_or_else(|e| {
+                    let addr = node.addr_at(oi.offset) as *mut ObjectMemoryEntry<T>;
+                    let entry = ObjectMemoryEntry::new_nowid(data);
+                    safe_memio::safe_write(addr, entry).unwrap_or_else(|e| {
                         error!(
-                            "Safe write failed at node {} offset {}: {}",
-                            node.id, offset, e
+                            "Safe write failed at node {}, obj id: {} offset {}: {}",
+                            node.id, oi.id, oi.offset, e
                         );
                     });
                 }
