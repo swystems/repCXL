@@ -9,7 +9,7 @@ use std::time::Duration;
 mod algorithms;
 mod safe_memio;
 mod shmem;
-use shmem::allocator::ObjectInfo;
+use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
 
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
@@ -69,17 +69,6 @@ impl<T> WriteRequest<T> {
         }
     }
 
-    // pub fn default() -> Self
-    // where
-    //     T: Default,
-    // {
-    //     WriteRequest {
-    //         object_id: 0,
-    //         data: T::default(),
-    //         ack_tx: mpsc::channel().0, // dummy sender
-    //     }
-    // }
-
     pub fn to_tuple(self) -> (ObjectInfo, T, mpsc::Sender<bool>) {
         (self.obj_info, self.data, self.ack_tx)
     }
@@ -88,7 +77,7 @@ impl<T> WriteRequest<T> {
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T: Copy> {
-    queue_tx: mpsc::Sender<WriteRequest<T>>,
+    req_queue_tx: mpsc::Sender<WriteRequest<T>>,
     info: ObjectInfo, // could also just store the offset
 }
 
@@ -97,20 +86,19 @@ impl<T: Copy> RepCXLObject<T> {
         id: usize,
         offset: usize,
         size: usize,
-        queue: mpsc::Sender<WriteRequest<T>>,
+        req_queue_tx: mpsc::Sender<WriteRequest<T>>,
     ) -> Self {
         RepCXLObject {
-            queue_tx: queue,
+            req_queue_tx,
             info: ObjectInfo::new(id, offset, size),
         }
     }
 
     pub fn write(&self, data: T) -> Result<(), String> {
-        
         let (ack_tx, ack_rx) = mpsc::channel();
         let req = WriteRequest::new(self.info, data, ack_tx);
-        
-        self.queue_tx
+
+        self.req_queue_tx
             .send(req)
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
         // std::thread::sleep(Duration::from_millis(10));
@@ -120,6 +108,61 @@ impl<T: Copy> RepCXLObject<T> {
             Ok(false) => Err("Failed write operation".into()),
             Err(e) => Err(format!("Failed to receive ack: {}", e)),
         }
+    }
+}
+
+/// RepCXL write request unique identifier. Stored next to every object
+/// Comparison checks for largest round number and smallest process ID if
+/// round numbers are equal.
+#[derive(Debug, Clone, Copy)]
+struct Wid {
+    round_num: u64,
+    process_id: usize,
+}
+
+impl PartialEq for Wid {
+    fn eq(&self, other: &Self) -> bool {
+        self.round_num == other.round_num && self.process_id == other.process_id
+    }
+}
+impl Eq for Wid {}
+
+impl PartialOrd for Wid {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Wid {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.round_num.cmp(&other.round_num) {
+            std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
+            std::cmp::Ordering::Less => std::cmp::Ordering::Less,
+            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id),
+        }
+    }
+}
+
+impl Wid {
+    pub fn new(round_num: u64, process_id: usize) -> Self {
+        Wid {
+            round_num,
+            process_id,
+        }
+    }
+}
+
+/// ObjectMemoryEntry. Stores the current write ID and the value of the object 
+/// in memory.
+// #[derive(Debug, Clone, Copy)]
+struct ObjectMemoryEntry<T> {
+    wid: Wid,
+    value: T,
+}
+
+impl<T> ObjectMemoryEntry<T> {
+    pub fn new(wid: Wid, value: T) -> Self {
+        ObjectMemoryEntry { wid, value }
     }
 }
 
@@ -211,7 +254,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     }
 
     /// Attempts to create a new shared, replicated object of type T across
-    /// all memory nodes. 
+    /// all memory nodes.
     ///
     /// # Arguments
     /// * `id` - Unique identifier for the object.
@@ -226,12 +269,12 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             return None;
         }
 
-        let size = std::mem::size_of::<T>(); // padded and aligned
+        let size = std::mem::size_of::<ObjectMemoryEntry<T>>(); // padded and aligned
 
         let mut state = self.read_state_from_any().unwrap();
 
-        // try to alloc object 
-        match state.allocator.alloc_object(id, size) {
+        // try to alloc object
+        match state.object_index.alloc_object(id, size) {
             Some(offset) => {
                 for node in &self.view.memory_nodes {
                     // write state to every memory node
@@ -255,7 +298,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
     pub fn remove_object(&mut self, id: usize) {
         let mut state = self.read_state_from_any().unwrap();
-        state.allocator.dealloc_object(id);
+        state.object_index.dealloc_object(id);
 
         // Update the shared state in each memory node
         for node in &mut self.view.memory_nodes {
@@ -273,7 +316,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         let state = self.read_state_from_any().unwrap();
 
-        if let Some(oi) = state.allocator.lookup_object(id) {
+        if let Some(oi) = state.object_index.lookup_object(id) {
             info!("Object found in shared state");
             let obj = RepCXLObject::new(id, oi.offset, oi.size, self.req_queue_tx.clone());
             return Some(obj);

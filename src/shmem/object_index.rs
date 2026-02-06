@@ -19,16 +19,16 @@ impl ObjectInfo {
 ///
 /// @TODO: add coordinator-only write checks
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct Allocator {
+pub(crate) struct ObjectIndex {
     total_size: usize,
     allocated_size: usize,
     chunk_size: usize,
     object_index: [Option<ObjectInfo>; MAX_OBJECTS],
 }
 
-impl Allocator {
+impl ObjectIndex {
     pub(crate) fn new(total_size: usize, chunk_size: usize) -> Self {
-        Allocator {
+        ObjectIndex {
             total_size,
             allocated_size: 0,
             chunk_size,

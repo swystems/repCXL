@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use crate::safe_memio;
 use crate::GroupView;
 use crate::WriteRequest;
-use crate::shmem::allocator::ObjectInfo;
+use crate::shmem::object_index::ObjectInfo;
 
 
 pub mod best_effort;

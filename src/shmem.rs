@@ -5,8 +5,8 @@ use std::os::unix::io::AsRawFd;
 // currently not used, requires the libnuma
 // mod numa_mem_node;
 
-pub mod allocator;
-use allocator::Allocator;
+pub mod object_index;
+use object_index::ObjectIndex;
 mod starting_block;
 use starting_block::StartingBlock;
 pub mod wcc;
@@ -19,7 +19,7 @@ const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SharedState {
-    pub(crate) allocator: Allocator,
+    pub(crate) object_index: ObjectIndex,
     starting_block: StartingBlock,
     owcc: ObjectWCC,
 }
@@ -27,7 +27,7 @@ pub(crate) struct SharedState {
 impl SharedState {
     pub(crate) fn new(total_size: usize, chunk_size: usize) -> Self {
         SharedState {
-            allocator: Allocator::new(total_size, chunk_size),
+            object_index: ObjectIndex::new(total_size, chunk_size),
             starting_block: StartingBlock::new(),
             owcc: ObjectWCC::new(),
         }
@@ -59,8 +59,8 @@ impl MemoryNode {
     // assumes all processes/VMs use the same file path
     pub(crate) fn from_file(id: usize, path: &str, size: usize) -> Self {
         if size <= STATE_SIZE {
-            panic!("Size must be greater than SharedState size:\n\tAllocator: {}\n\tstarting_block: {}\n\twcc_mo: {}", 
-                std::mem::size_of::<Allocator>(), 
+            panic!("Size must be greater than SharedState size:\n\tObjectIndex: {}\n\tstarting_block: {}\n\twcc_mo: {}", 
+                std::mem::size_of::<ObjectIndex>(), 
                 std::mem::size_of::<StartingBlock>(), 
                 std::mem::size_of::<ObjectWCC>()
             );
