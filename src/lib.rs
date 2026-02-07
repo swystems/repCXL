@@ -97,7 +97,7 @@ impl<T: Copy> RepCXLObject<T> {
 
     pub fn write(&self, data: T) -> Result<(), String> {
         let (ack_tx, ack_rx) = mpsc::channel();
-        let req = WriteRequest::new(self.info, data, ack_tx);ObjectMemoryEntry
+        let req = WriteRequest::new(self.info, data, ack_tx);
 
         self.req_queue_tx
             .send(req)
