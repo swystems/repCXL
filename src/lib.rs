@@ -3,14 +3,17 @@
 /// all machines.
 use log::{debug, error, info, warn};
 
-use std::sync::mpsc;
+use std::hash::Hash;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 mod algorithms;
 mod safe_memio;
 mod shmem;
-use shmem::allocator::ObjectInfo;
+use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
+
 
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
 const MAX_OBJECTS: usize = 128; // Maximum number of objects
@@ -23,9 +26,9 @@ struct GroupView {
     processes: Vec<usize>,
     memory_nodes: Vec<MemoryNode>,
 }
+
 unsafe impl Send for GroupView {} // required because MemoryNode contains raw pointers
 unsafe impl Sync for GroupView {}
-
 impl GroupView {
     fn new(self_id: usize) -> Self {
         GroupView {
@@ -54,55 +57,161 @@ impl GroupView {
     }
 }
 
+pub struct WriteRequest<T> {
+    pub(crate) obj_info: ObjectInfo,
+    pub data: T,
+    pub ack_tx: mpsc::Sender<bool>,
+}
+
+impl<T> WriteRequest<T> {
+    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
+        WriteRequest {
+            obj_info,
+            data,
+            ack_tx,
+        }
+    }
+
+    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, mpsc::Sender<bool>) {
+        (self.obj_info, self.data, self.ack_tx)
+    }
+}
+
+pub struct ReadRequest<T> {
+    pub(crate) obj_info: ObjectInfo,
+    pub ack_tx: mpsc::Sender<ReadReturn<T>>,
+}
+
+impl<T> ReadRequest<T> {
+    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: mpsc::Sender<ReadReturn<T>>) -> Self {
+        ReadRequest { obj_info, ack_tx }
+    }
+}
+
+pub enum ReadReturn<T> {
+    ReadSafe(T),
+    ReadDirty(T),
+}
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
-pub struct RepCXLObject<T> {
-    queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
+pub struct RepCXLObject<T: Copy> {
+    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
+    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     info: ObjectInfo, // could also just store the offset
 }
 
-impl<T> RepCXLObject<T> {
+impl<T: Copy> RepCXLObject<T> {
     pub fn new(
         id: usize,
         offset: usize,
         size: usize,
-        queue: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
+        wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
+        rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     ) -> Self {
         RepCXLObject {
-            queue_tx: queue,
+            wreq_queue_tx,
+            rreq_queue_tx,
             info: ObjectInfo::new(id, offset, size),
         }
     }
 
     pub fn write(&self, data: T) -> Result<(), String> {
-        // check size matches
-        // currently broken because non coordinatoor will read the chunk size of T
-        // from the shared state, which is likely more than the actual size of T
-        // @TODO: fix
-        // if std::mem::size_of_val(&data) != self.info.size {
-        //     debug!(
-        //         "data size: {}, object size: {}",
-        //         std::mem::size_of_val(&data),
-        //         self.info.size
-        //     );
-        //     return Err("Data size does not match object size");
-        // }
-
-        // enqueue to coordination thread
-        // @TODO: might be expensive to send the channel every time, consider storing the
-        // objects in the shmuc_thread
-
         let (ack_tx, ack_rx) = mpsc::channel();
-        self.queue_tx
-            .send((self.info.offset, data, ack_tx))
-            .map_err(|e| format!("Failed to send to object queue: {}", e))?;
+        let req = WriteRequest::new(self.info, data, ack_tx);
 
+        self.wreq_queue_tx
+            .send(req)
+            .map_err(|e| format!("Failed to send to object queue: {}", e))?;
         // std::thread::sleep(Duration::from_millis(10));
         // wait for ack
         match ack_rx.recv() {
             Ok(true) => Ok(()),
             Ok(false) => Err("Failed write operation".into()),
             Err(e) => Err(format!("Failed to receive ack: {}", e)),
+        }
+    }
+
+    pub fn read(&self) -> Result<ReadReturn<T>, String> {
+        let (ack_tx, ack_rx) = mpsc::channel();
+        let req = ReadRequest::new(self.info, ack_tx);
+        self.rreq_queue_tx
+            .send(req)
+            .map_err(|e| format!("Failed to send to object queue: {}", e))
+            .unwrap();
+
+        // wait for ack
+        match ack_rx.recv() {
+            Ok(return_val) => Ok(return_val)    ,
+            Err(e) => Err(format!("Failed to receive read ack: {}", e)),
+        }
+    }
+}
+
+/// RepCXL write request unique identifier. Stored next to every object
+/// Comparison checks for largest round number and smallest process ID if
+/// round numbers are equal.
+#[derive(Debug, Clone, Copy)]
+struct Wid {
+    round_num: u64,
+    process_id: usize,
+}
+
+impl PartialEq for Wid {
+    fn eq(&self, other: &Self) -> bool {
+        self.round_num == other.round_num && self.process_id == other.process_id
+    }
+}
+impl Eq for Wid {}
+
+impl PartialOrd for Wid {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Wid {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.round_num.cmp(&other.round_num) {
+            std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
+            std::cmp::Ordering::Less => std::cmp::Ordering::Less,
+            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id),
+        }
+    }
+}
+
+impl Hash for Wid {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.round_num.hash(state);
+        self.process_id.hash(state);
+    }
+}
+
+impl Wid {
+    pub fn new(round_num: u64, process_id: usize) -> Self {
+        Wid {
+            round_num,
+            process_id,
+        }
+    }
+}
+
+/// ObjectMemoryEntry. Stores the current write ID and the value of the object 
+/// in memory.
+#[derive(Debug, Clone, Copy)]
+struct ObjectMemoryEntry<T> {
+    wid: Wid,
+    value: T,
+}
+
+impl<T: Copy> ObjectMemoryEntry<T> {
+    pub fn new(wid: Wid, value: T) -> Self {
+        ObjectMemoryEntry { wid, value }
+    }
+
+    pub fn new_nowid(value: T) -> Self {
+        ObjectMemoryEntry {
+            wid: Wid::new(0, 0),
+            value,
         }
     }
 }
@@ -115,10 +224,12 @@ pub struct RepCXL<T> {
     chunk_size: usize, // Size of each chunk in bytes
     num_of_objects: usize,
     view: GroupView,
-    // objects: HashMap<usize, RepCXLObject>, // id -> object
     round_time: Duration,
-    obj_queue_tx: mpsc::Sender<(usize, T, mpsc::Sender<bool>)>,
-    obj_queue_rx: Option<mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>>,
+    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
+    wreq_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
+    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
+    rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
+    stop_flag: Arc<AtomicBool>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -132,8 +243,9 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
         view.processes.push(id); // add self to group
 
-        // dummy channel for init
-        let (tx, rx) = mpsc::channel();
+        // init read and write request queues
+        let (wtx, wrx) = mpsc::channel();
+        let (rtx, rrx) = mpsc::channel();
 
         RepCXL {
             id,
@@ -141,10 +253,12 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             chunk_size,
             num_of_objects: 0,
             view,
-            // objects: HashMap::new(),
             round_time,
-            obj_queue_tx: tx,
-            obj_queue_rx: Some(rx),
+            wreq_queue_tx: wtx,
+            wreq_queue_rx: Some(wrx),
+            rreq_queue_tx: rtx,
+            rreq_queue_rx: Some(rrx),
+            stop_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -179,7 +293,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         Err("Could not read state from any memory node!")
     }
 
-    // Get a mutable reference to the starting block from the master node
+    // Get a mutable reference to the starting block from the master memory node
     fn get_state_from_master(&self) -> Result<&mut SharedState, &str> {
         if let Some(master) = self.view.get_master_node() {
             let state = master.get_state();
@@ -207,22 +321,28 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             return None;
         }
 
-        let size = std::mem::size_of::<T>(); // padded and aligned
+        if !self.is_coordinator() {
+            warn!("Only the coordinator can create new objects");
+            return None;
+        }
+
+        let size = std::mem::size_of::<ObjectMemoryEntry<T>>(); // padded and aligned
 
         let mut state = self.read_state_from_any().unwrap();
 
         // try to alloc object
-        match state.allocator.alloc_object(id, size) {
+        match state.object_index.alloc_object(id, size) {
             Some(offset) => {
                 for node in &self.view.memory_nodes {
                     // write state to every memory node
                     node.write_state(state);
                 }
 
-                // clone the object transmission queue
-                let tx = self.obj_queue_tx.clone();
+                // clone the request queues
+                let wtx = self.wreq_queue_tx.clone();
+                let rtx = self.rreq_queue_tx.clone();
                 // create the new RepCXLObject
-                let obj = RepCXLObject::new(id, offset, size, tx);
+                let obj = RepCXLObject::new(id, offset, size, wtx, rtx);
 
                 self.num_of_objects += 1;
                 return Some(obj);
@@ -232,18 +352,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 return None;
             }
         }
-
-        // self.objects.insert(
-        //     id,
-        //     RepCXLObject::new(id, offset, size, self.obj_queue_tx.clone()),
-        // );
-
-        // self.objects.get(&id)
     }
 
     pub fn remove_object(&mut self, id: usize) {
         let mut state = self.read_state_from_any().unwrap();
-        state.allocator.dealloc_object(id);
+        state.object_index.dealloc_object(id);
 
         // Update the shared state in each memory node
         for node in &mut self.view.memory_nodes {
@@ -254,11 +367,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Attempt to get an object reference by its ID first in the local cache
     /// and then in the shared state.
     pub fn get_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
-        // if self.objects.contains_key(&id) {
-        //     debug!("object found in repcxl local cache");
-        //     return self.objects.get(&id);
-        // }
-
         // info!(
         //     "Object with id {} not found in cache, looking in shared state",
         //     id
@@ -266,20 +374,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         let state = self.read_state_from_any().unwrap();
 
-        if let Some(oi) = state.allocator.lookup_object(id) {
+        if let Some(oi) = state.object_index.lookup_object(id) {
             info!("Object found in shared state");
-            let obj = RepCXLObject::new(id, oi.offset, oi.size, self.obj_queue_tx.clone());
+            let obj = RepCXLObject::new(id, oi.offset, oi.size, self.wreq_queue_tx.clone(), self.rreq_queue_tx.clone());
             return Some(obj);
-            // self.objects.insert(
-            //     id,
-            //     RepCXLObject {
-            //         id,
-            //         addresses,
-            //         size: oe.size,
-            //     },
-            // );
-
-            // return self.objects.get(&id);
         }
         None
     }
@@ -288,7 +386,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// **assumes sync'ed clocks**
     /// All processes must call this function with the same group view to
     /// ensure consistency.
-    pub fn sync_start(&mut self) {
+    pub fn sync_start(&mut self, algorithm: String) {
         if let Some(coord) = self.view.get_coordinator() {
             let mstate = self.get_state_from_master().unwrap();
             let sblock = mstate.get_starting_block();
@@ -324,13 +422,26 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             let v = self.view.clone();
             let rt = self.round_time;
 
-            // create object queue channel: move the receiver to the thread
-            // and keep the sender in state to assign to new objects
-            // let (tx, rx) = mpsc::channel();
-            let rx = self.obj_queue_rx.take().expect("Receiver already taken");
-            std::thread::spawn(move || {
-                algorithms::shmuc(v, start_time, rt, rx);
-            });
+            // for both read and write threads move the rx queue to the thread
+            // and keep the tx queue in state to assign to new objects
+            
+            // WRITE thread
+            {
+                let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
+                let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+                std::thread::spawn(move || {
+                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop);
+                });
+            }
+
+            // READ thread
+            {
+                let stop = self.stop_flag.clone();
+                let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
+                std::thread::spawn(move || {
+                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
+                });
+            }
 
             // block until after start time
             std::thread::sleep(Duration::from_secs(2));
@@ -338,5 +449,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             error!("FATAL: No coordinator found in group");
             return;
         }
+    }
+
+    pub fn stop(&self) {
+        info!("Stopping repCXL process {}. Goodbye...", self.id);
+        self.stop_flag.store(true, Ordering::Relaxed);
     }
 }

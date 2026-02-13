@@ -1,35 +1,35 @@
-use libc::{c_int, c_void, mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
+use libc::{mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use std::fs::OpenOptions;
 use std::os::unix::io::AsRawFd;
 
-pub mod allocator;
-use allocator::Allocator;
+// currently not used, requires the libnuma
+// mod numa_mem_node;
+
+pub mod object_index;
+use object_index::ObjectIndex;
 mod starting_block;
 use starting_block::StartingBlock;
-pub mod wcr;
-use wcr::WriteConflictChecker;
+pub mod wcc;
+use wcc::ObjectWCC;
+
 
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 
-#[link(name = "numa")]
-extern "C" {
-    pub fn numa_alloc_onnode(size: usize, node: c_int) -> *mut c_void;
-    pub fn numa_free(mem: *mut c_void, size: usize);
-}
+
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SharedState {
-    pub(crate) allocator: Allocator,
+    pub(crate) object_index: ObjectIndex,
     starting_block: StartingBlock,
-    wcr: WriteConflictChecker,
+    owcc: ObjectWCC,
 }
 
 impl SharedState {
     pub(crate) fn new(total_size: usize, chunk_size: usize) -> Self {
         SharedState {
-            allocator: Allocator::new(total_size, chunk_size),
+            object_index: ObjectIndex::new(total_size, chunk_size),
             starting_block: StartingBlock::new(),
-            wcr: WriteConflictChecker::new(),
+            owcc: ObjectWCC::new(),
         }
     }
 
@@ -37,22 +37,16 @@ impl SharedState {
         &mut self.starting_block
     }
 
-    pub(crate) fn get_wcr(&mut self) -> &mut WriteConflictChecker {
-        &mut self.wcr
+    pub(crate) fn get_owcc(&mut self) -> &mut ObjectWCC {
+        &mut self.owcc
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Hash, Clone)]
-enum MemoryType {
-    Numa,
-    File,
-}
 
 // @TODO: add type for addr since repcxl is currently type-specific?
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub(crate) struct MemoryNode {
     pub id: usize,
-    type_: MemoryType,
     state_addr: *mut SharedState,
     obj_addr: *mut u8,
     size: usize,
@@ -65,7 +59,11 @@ impl MemoryNode {
     // assumes all processes/VMs use the same file path
     pub(crate) fn from_file(id: usize, path: &str, size: usize) -> Self {
         if size <= STATE_SIZE {
-            panic!("Size must be greater than Allocator size");
+            panic!("Size must be greater than SharedState size:\n\tObjectIndex: {}\n\tstarting_block: {}\n\twcc_mo: {}", 
+                std::mem::size_of::<ObjectIndex>(), 
+                std::mem::size_of::<StartingBlock>(), 
+                std::mem::size_of::<ObjectWCC>()
+            );
         }
 
         let file = OpenOptions::new()
@@ -97,24 +95,6 @@ impl MemoryNode {
 
         MemoryNode {
             id,
-            type_: MemoryType::File,
-            state_addr: ptr as *mut SharedState,
-            obj_addr: unsafe { ptr.offset(STATE_SIZE as isize) },
-            size,
-        }
-    }
-
-    /// WARNING: placeholder only. memory is not shared, every node will its own memory region
-    fn _from_numa(id: usize, size: usize, numa_node: i32) -> Self {
-        let ptr = unsafe { numa_alloc_onnode(size, numa_node) };
-        if ptr.is_null() {
-            panic!("numa_alloc_onnode failed");
-        }
-        let ptr = ptr as *mut u8;
-
-        MemoryNode {
-            id,
-            type_: MemoryType::Numa,
             state_addr: ptr as *mut SharedState,
             obj_addr: unsafe { ptr.offset(STATE_SIZE as isize) },
             size,
@@ -147,18 +127,13 @@ impl MemoryNode {
 
 impl Drop for MemoryNode {
     fn drop(&mut self) {
-        if self.type_ == MemoryType::Numa {
-            unsafe {
-                numa_free(self.obj_addr as *mut c_void, self.size);
-            }
-        } else if self.type_ == MemoryType::File {
-            unsafe {
-                munmap(self.obj_addr as *mut libc::c_void, self.size);
-            }
-            // File is automatically closed when it goes out of scope
+        unsafe {
+            munmap(self.obj_addr as *mut libc::c_void, self.size);
         }
+        // File is automatically closed when it goes out of scope
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -169,7 +144,7 @@ mod tests {
     fn test_memory_node_from_file() {
         let mnid = 1;
         let path = "/dev/shm/repCXL_test";
-        let size = 4096; // 1 KiB
+        let size: usize = 10 * 1024 * 1024; // 1 MiB
 
         // Create and open the file with read/write permissions
         let file = OpenOptions::new()
@@ -179,37 +154,15 @@ mod tests {
             .open(path)
             .expect("Failed to create/open file in tmpfs");
 
-        // Resize the file to 4096 bytes (one page)
-        file.set_len(4096).expect("Failed to set file length");
+        file.set_len(size as u64).expect("Failed to set file length");
 
         let node = MemoryNode::from_file(mnid, path, size);
         assert_eq!(node.id, mnid);
-        assert_eq!(node.type_, MemoryType::File);
         assert!(!node.obj_addr.is_null());
-        assert_eq!(node.size, size); // 1 KiB
+        assert_eq!(node.size, size);
 
         // Clean up: remove the tmpfs file
         remove_file(path).expect("Failed to remove tmpfs file");
     }
 
-    #[test]
-    fn test_memory_node_from_numa() {
-        let mnid = 0;
-        let size = 1024; // 1 KiB
-        let numa_node = 0; // Node 0 should exist on most systems
-
-        let node = MemoryNode::_from_numa(mnid, size, numa_node);
-
-        unsafe {
-            *node.obj_addr = 31;
-            // Initialize the shared memory region to zero
-            std::ptr::write_bytes(node.obj_addr, 4, size);
-        }
-
-        assert_eq!(node.id, mnid);
-        assert_eq!(node.type_, MemoryType::Numa);
-        assert!(!node.obj_addr.is_null());
-
-        assert_eq!(node.size, size); // 1 KiB
-    }
 }

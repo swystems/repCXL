@@ -4,24 +4,26 @@ use log::{debug, error};
 use rand::Rng;
 use rep_cxl::RepCXL;
 use simple_logger;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // CONFIG
 const NODE_PATHS: [&str; 3] = [
-    "/dev/shm/repCXL_test0",
     "/dev/shm/repCXL_test1",
     "/dev/shm/repCXL_test2",
+    "/dev/shm/repCXL_test3",
 ];
 const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 const CHUNK_SIZE: usize = 64; // 64 bytes
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
 
 // DEFAULTS
-const DEFAULT_ATTEMPTS: &str = "1000";
-const DEFAULT_CLIENTS: &str = "2";
+const DEFAULT_ATTEMPTS: &str = "100";
+const DEFAULT_CLIENTS: &str = "1";
 const DEFAULT_OBJECTS: &str = "100";
-const DEFAULT_COMPUTE_NODES: &str = "2";
+const DEFAULT_PROCESSES: &str = "1";
 const DEFAULT_ROUND_TIME_NS: &str = "1000000"; //1ms
+const DEFAULT_ALGORITHM: &str = "monster";
 
 pub fn percentile(latencies: &Vec<u128>, p: f32) -> u128 {
     if latencies.is_empty() {
@@ -57,26 +59,26 @@ fn main() {
                 .value_parser(value_parser!(u32)),
         )
         .arg(
-            Arg::new("node_id")
+            Arg::new("id")
                 .short('i')
-                .long("node_id")
-                .help("Unique identifier for the node/machine")
+                .long("id")
+                .help("Unique identifier for the repCXL instance")
                 .required(true)
                 .value_parser(value_parser!(u32)),
         )
         .arg(
-            Arg::new("nodes")
-                .short('n')
-                .long("nodes")
-                .help("Number of total compute nodes")
-                .default_value(DEFAULT_COMPUTE_NODES)
+            Arg::new("processes")
+                .short('p')
+                .long("processes")
+                .help("Number of total repCXL processes")
+                .default_value(DEFAULT_PROCESSES)
                 .value_parser(value_parser!(u32)),
         )
         .arg(
-            Arg::new("threads")
-                .short('t')
-                .long("threads")
-                .help("Number of threads (rep_cxl instances issuing requests) for the current node. Must be the same for all COMPUTE_NODES")
+            Arg::new("clients")
+                .short('c')
+                .long("clients")
+                .help("Number of clients issuing requests to the current repCXL process. Must be the same for all repCXL processes")
                 .default_value(DEFAULT_CLIENTS)
                 .value_parser(value_parser!(u32)),
         )
@@ -88,88 +90,101 @@ fn main() {
                 .default_value(DEFAULT_OBJECTS)
                 .value_parser(value_parser!(usize)),
         )
+        .arg(
+            Arg::new("algorithm")
+                .short('A')
+                .long("algorithm")
+                .help("Replication algorithm to use")
+                .default_value(DEFAULT_ALGORITHM)
+                .value_parser(value_parser!(String)),
+        )
         .get_matches();
 
     // Parse the command line arguments
     let round_time_ns = matches.get_one::<u64>("round_time").unwrap().clone();
+    let round_time = Duration::from_nanos(round_time_ns);
 
-    let node_id = matches.get_one::<u32>("node_id").unwrap().clone();
-    let nodes = matches.get_one::<u32>("nodes").unwrap().clone();
-    if node_id >= nodes {
-        error!("node_id must be less than nodes");
-        error!("node_id: {node_id}, nodes: {nodes}");
+    let id = matches.get_one::<u32>("id").unwrap().clone();
+    let processes = matches.get_one::<u32>("processes").unwrap().clone();
+    if id >= processes {
+        error!("id must be less than the number of processes");
+        error!("id: {id}, # of processes: {processes}");
         std::process::exit(1);
     }
 
     let attempts = matches.get_one::<u32>("attempts").unwrap().clone();
-    let threads = matches.get_one::<u32>("threads").unwrap().clone();
+    let clients = matches.get_one::<u32>("clients").unwrap().clone();
     let num_of_objects = matches.get_one::<usize>("objects").unwrap().clone();
 
-    // init metrics vectors
+    let algorithm = matches.get_one::<String>("algorithm").unwrap().clone();
 
-    let round_time = Duration::from_nanos(round_time_ns);
+    // start repCXL process
+    debug!("Starting RepCXL instance with id {}", id);
+     let mut rcxl =
+        RepCXL::<u64>::new(id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
 
+    // open memory nodes
+    for path in NODE_PATHS.iter() {
+        rcxl.add_memory_node_from_file(path);
+    }
+
+    // add processes to initial group view
+    for process in 0..processes {
+        rcxl.register_process(process as usize);
+    }
+
+    let mut objects = Vec::new();
+    // only the coordinator manages the state
+    if rcxl.is_coordinator() {
+        debug!("Starting as coordinator with id {}", rcxl.id);
+        rcxl.init_state();
+
+        for i in 0..num_of_objects {
+            debug!("Creating object {}", i);
+            let obj = rcxl.new_object(i).expect("failed to create object");
+            objects.push(obj);
+        }
+    }
+    // Replica
+    else {
+        debug!("Starting as replica with id {}", rcxl.id);
+
+        for i in 0..num_of_objects {
+            // try until the coordinator creates the object
+            let obj = loop {
+                match rcxl.get_object(i) {
+                    Some(obj) => break obj,
+                    None => std::thread::sleep(Duration::from_millis(100)),
+                }
+            };
+            objects.push(obj);
+        }
+    }
+
+
+    rcxl.sync_start(algorithm);
+
+    
+    // start benchmark
+    let objects = Arc::new(objects);
     let mut client_handles = Vec::new();
-    let total_processes = threads * nodes;
 
+    // init metrics vectors
     let (lats_tx, lats_rx) = std::sync::mpsc::channel();
     let (tput_tx, tput_rx) = std::sync::mpsc::channel();
-    for c in 0..threads {
+
+    for c in 0..clients {   
         let lats_tx = lats_tx.clone();
         let tput_tx = tput_tx.clone();
+
+        let objects = Arc::clone(&objects);
         let handle = std::thread::spawn(move || {
-            // assign incremental ids depending on the node
-            // assumes that all COMPUTE_NODES have the same number of threads
-            let rcxl_id = node_id * threads + c;
-            debug!("Starting RepCXL instance with id {}", rcxl_id);
-            let mut rcxl =
-                RepCXL::<u64>::new(rcxl_id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
-
-            // open memory COMPUTE_NODES
-            for path in NODE_PATHS.iter() {
-                rcxl.add_memory_node_from_file(path);
-            }
-
-            // add processes to initial group view
-            for process in 0..total_processes {
-                rcxl.register_process(process as usize);
-            }
-
-            let mut objects = Vec::new();
-            // only the coordinator manages the state
-            if rcxl.is_coordinator() {
-                debug!("Starting as coordinator with id {}", rcxl.id);
-                rcxl.init_state();
-
-                for i in 0..num_of_objects {
-                    debug!("Creating object {}", i);
-                    let obj = rcxl.new_object(i).expect("failed to create object");
-                    objects.push(obj);
-                }
-            }
-            // Replica
-            else {
-                debug!("Starting as replica with id {}", rcxl.id);
-
-                for i in 0..num_of_objects {
-                    // try until the coordinator creates the object
-                    let obj = loop {
-                        match rcxl.get_object(i) {
-                            Some(obj) => break obj,
-                            None => std::thread::sleep(Duration::from_millis(100)),
-                        }
-                    };
-                    objects.push(obj);
-                }
-            }
-
-            // rcxl.dump_states();
-
-            rcxl.sync_start();
+            debug!("Starting client thread {}", c);
 
             let mut lats = Vec::new();
             let mut rng = rand::rng();
-
+            
+            
             let total_start = Instant::now();
             for _ in 0..attempts {
                 let id = rng.random_range(0..num_of_objects);
@@ -187,10 +202,11 @@ fn main() {
             lats_tx.send(lats).unwrap();
             tput_tx.send(attempts as f64 / total_elapsed_s).unwrap();
         }); // end of thread body
+
         client_handles.push(handle);
     }
 
-    // collect and print stats (probably dumb way of doing it I know)
+    // collect and print stats (probably dumb way of doing it)
     let mut lats_ns = Vec::new();
     let mut total_tputs = Vec::new();
 
@@ -211,6 +227,9 @@ fn main() {
     for handle in client_handles {
         handle.join().unwrap();
     }
+
+    // drop extra senders to make the recv loop exit
+    rcxl.stop();
 
     println!(
         "Throughput: {:.2} ops/sec",
