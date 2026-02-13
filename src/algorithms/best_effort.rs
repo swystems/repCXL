@@ -1,5 +1,6 @@
 use std::time::{Duration, SystemTime};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use log::{error, warn};
 use crate::ObjectMemoryEntry;
 
@@ -12,9 +13,14 @@ pub fn async_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     _start_time: SystemTime,
     _round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
+    stop_flag: Arc<AtomicBool>,
 ) {
 
     loop {
+        if stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
         match req_queue_rx.try_recv() {
             Ok(req) => {
                 // write data to all memory nodes
@@ -53,6 +59,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     start_time: SystemTime,
     round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
+    stop_flag: Arc<AtomicBool>,
 ) {
     
     let mut round_num = 0;
@@ -61,6 +68,9 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     wait_start_time(start_time, ROUND_SLEEP_RATIO);
 
     loop {
+        if stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
 
         debug!(
             "Round #{round_num}, delay {:?}",

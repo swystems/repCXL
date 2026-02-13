@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use super::*;
 use crate::Wid;
 use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
@@ -46,6 +49,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     start_time: SystemTime,
     round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
+    stop_flag: Arc<AtomicBool>,
 ) {
     let mut round_num = 0;
     let mut monster_state = MonsterState::Try;
@@ -64,6 +68,10 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     wait_start_time(start_time, ROUND_SLEEP_RATIO);
 
     loop {
+        if stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
         monster_info!(monster_state,
             "Round #{round_num}, delay {:?}, obj id: {}",
             SystemTime::now().duration_since(round_start).unwrap(),
@@ -88,8 +96,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                             // no request, stay in Try state
                         },
                         mpsc::TryRecvError::Disconnected => {
-                            warn!("request queue channel closed: {}", e);
-                            break;
+                            monster_info!(monster_state, "request queue channel closed: {}", e);
                         }
                     }
                 }
@@ -214,9 +221,13 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
     _start_time: SystemTime,
     _round_time: Duration,
     req_queue_rx: mpsc::Receiver<ReadRequest<T>>,
+    stop_flag: Arc<AtomicBool>,
 ) {
     
     loop {
+        if stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
         match req_queue_rx.recv() {
             Ok(req) => {
                 match mem_readall(req.obj_info.offset, &view.memory_nodes) {
@@ -243,8 +254,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
                 }
             },
             Err(e) => {
-                warn!("Read request channel closed: {}", e);
-                break;
+                log::info!("[READ] Read request channel closed: {}", e);
             }
         }
     }

@@ -4,7 +4,8 @@
 use log::{debug, error, info, warn};
 
 use std::hash::Hash;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 mod algorithms;
@@ -228,6 +229,7 @@ pub struct RepCXL<T> {
     wreq_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
     rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
+    stop_flag: Arc<AtomicBool>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -256,6 +258,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             wreq_queue_rx: Some(wrx),
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
+            stop_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -424,18 +427,19 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             
             // WRITE thread
             {
-                let (algorithm, v) = (algorithm.clone(), v.clone());
+                let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
                 let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
                 std::thread::spawn(move || {
-                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx);
+                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop);
                 });
             }
 
             // READ thread
             {
+                let stop = self.stop_flag.clone();
                 let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
                 std::thread::spawn(move || {
-                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx);
+                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
                 });
             }
 
@@ -445,5 +449,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             error!("FATAL: No coordinator found in group");
             return;
         }
+    }
+
+    pub fn stop(&self) {
+        info!("Stopping repCXL process {}. Goodbye...", self.id);
+        self.stop_flag.store(true, Ordering::Relaxed);
     }
 }

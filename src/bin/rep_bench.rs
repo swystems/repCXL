@@ -23,7 +23,7 @@ const DEFAULT_CLIENTS: &str = "1";
 const DEFAULT_OBJECTS: &str = "100";
 const DEFAULT_PROCESSES: &str = "1";
 const DEFAULT_ROUND_TIME_NS: &str = "1000000"; //1ms
-const DEFAULT_ALGORITHM: &str = "sync_best_effort";
+const DEFAULT_ALGORITHM: &str = "monster";
 
 pub fn percentile(latencies: &Vec<u128>, p: f32) -> u128 {
     if latencies.is_empty() {
@@ -185,7 +185,6 @@ fn main() {
             let mut rng = rand::rng();
             
             
-
             let total_start = Instant::now();
             for _ in 0..attempts {
                 let id = rng.random_range(0..num_of_objects);
@@ -228,6 +227,9 @@ fn main() {
     for handle in client_handles {
         handle.join().unwrap();
     }
+
+    // drop extra senders to make the recv loop exit
+    rcxl.stop();
 
     println!(
         "Throughput: {:.2} ops/sec",

@@ -1,5 +1,6 @@
-use log::{debug, error, warn};
-use std::sync::mpsc;
+use log::{debug, error};
+use std::sync::atomic::{AtomicBool};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime};
 
 use crate::safe_memio;
@@ -22,6 +23,7 @@ pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     SystemTime,
     Duration,
     mpsc::Receiver<WriteRequest<T>>,
+    Arc<AtomicBool>,
 ) {
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort,
@@ -38,9 +40,10 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     SystemTime,
     Duration,
     mpsc::Receiver<ReadRequest<T>>,
+    Arc<AtomicBool>,
 ) {
     match algorithm.as_str() {
-        "monster" => monster::monster_read,
+        "monster_read" => monster::monster_read,
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }
@@ -113,67 +116,3 @@ pub fn wait_next_round(
 
     (round_num + 1, next_round)
 }
-
-/// Every round write 1 object to all memory nodes and read back to verify the write
-/// was successful
-pub fn _write_verify<T: Copy + PartialEq + std::fmt::Debug>(
-    view: super::GroupView,
-    start_time: SystemTime,
-    round_time: Duration,
-    req_queue_rx: mpsc::Receiver<(usize, T, mpsc::Sender<bool>)>,
-) {
-    let mut round_num = 0;
-    // wait to start
-    let mut next_round = start_time;
-    wait_start_time(start_time, ROUND_SLEEP_RATIO);
-
-    loop {
-        // logic here
-        debug!(
-            "Round #{round_num}, delay {:?}",
-            SystemTime::now().duration_since(next_round).unwrap()
-        );
-
-        match req_queue_rx.try_recv() {
-            Ok((offset, data, ack_tx)) => {
-                // write data to all memory nodes
-                let mut success = true;
-                for node in &view.memory_nodes {
-                    let addr = node.addr_at(offset) as *mut T;
-                    unsafe {
-                        std::ptr::write(addr, data);
-                        // *addr = data;
-                    }
-                    // verify write
-                    let read_back = unsafe { std::ptr::read(addr) };
-                    if read_back != data {
-                        warn!(
-                            "Write verification failed on node {}: wrote {:?}, read back {:?}",
-                            node.id, data, read_back
-                        );
-                        success = false;
-                    }
-                    debug!("Successfully wrote {:?} to node {}", data, node.id);
-                }
-
-                // send ack
-                if let Err(e) = ack_tx.send(success) {
-                    error!("Failed to send ack: {}", e);
-                }
-            }
-            Err(e) => {
-                match e {
-                    mpsc::TryRecvError::Empty => (),
-                    mpsc::TryRecvError::Disconnected => {
-                        warn!("Object queue channel closed: {}", e);
-                        break; // exit thread
-                    }
-                }
-            }
-        }
-
-        (round_num, next_round) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
-    }
-}
-
-
