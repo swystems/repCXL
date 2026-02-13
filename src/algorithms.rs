@@ -4,8 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::safe_memio;
 use crate::GroupView;
-use crate::WriteRequest;
-use crate::ObjectMemoryEntry;
+use crate::{WriteRequest,ReadRequest};
 
 
 pub mod best_effort;
@@ -15,38 +14,8 @@ pub mod monster;
 const ROUND_SLEEP_RATIO: f64 = 0.0; // Percentage of round time to sleep before busy-waiting
 const _ALGORITHM: &str = "sync_best_effort"; // default algorithm
 
-pub fn _from_global<T: Copy + PartialEq + std::fmt::Debug>(    
-    view: GroupView,
-    st: SystemTime,
-    round_time: Duration,
-    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
-) {
-    match _ALGORITHM {
-        "async_best_effort" => best_effort::async_best_effort(
-            view,
-            st,
-            round_time,
-            req_queue_rx,
-        ),
-        "sync_best_effort" => best_effort::sync_best_effort(
-            view,
-            st,
-            round_time,
-            req_queue_rx,
-        ),
-        "monster" => monster::monster(
-            view,
-            st,
-            round_time,
-            req_queue_rx,
-        ),
-        _ => {
-            panic!("Unknown algorithm, check config: {}", _ALGORITHM);
-        }
-    }
-}
 
-pub fn from_string<T: Copy + PartialEq + std::fmt::Debug>(
+pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: String,
 ) -> fn(
     GroupView,
@@ -57,7 +26,21 @@ pub fn from_string<T: Copy + PartialEq + std::fmt::Debug>(
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort,
         "sync_best_effort" => best_effort::sync_best_effort,
-        "monster" => monster::monster,
+        "monster" => monster::monster_write,
+        _ => panic!("Unknown algorithm, check config: {}", algorithm),
+    }
+}
+
+pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
+    algorithm: String,
+) -> fn(
+    GroupView,
+    SystemTime,
+    Duration,
+    mpsc::Receiver<ReadRequest<T>>,
+) {
+    match algorithm.as_str() {
+        "monster" => monster::monster_read,
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }

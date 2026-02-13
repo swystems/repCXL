@@ -13,6 +13,7 @@ mod shmem;
 use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
 
+
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
 const MAX_OBJECTS: usize = 128; // Maximum number of objects
 
@@ -75,10 +76,26 @@ impl<T> WriteRequest<T> {
     }
 }
 
+pub struct ReadRequest<T> {
+    pub(crate) obj_info: ObjectInfo,
+    pub ack_tx: mpsc::Sender<ReadReturn<T>>,
+}
+
+impl<T> ReadRequest<T> {
+    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: mpsc::Sender<ReadReturn<T>>) -> Self {
+        ReadRequest { obj_info, ack_tx }
+    }
+}
+
+pub enum ReadReturn<T> {
+    ReadSafe(T),
+    ReadDirty(T),
+}
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T: Copy> {
-    req_queue_tx: mpsc::Sender<WriteRequest<T>>,
+    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
+    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     info: ObjectInfo, // could also just store the offset
 }
 
@@ -87,10 +104,12 @@ impl<T: Copy> RepCXLObject<T> {
         id: usize,
         offset: usize,
         size: usize,
-        req_queue_tx: mpsc::Sender<WriteRequest<T>>,
+        wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
+        rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     ) -> Self {
         RepCXLObject {
-            req_queue_tx,
+            wreq_queue_tx,
+            rreq_queue_tx,
             info: ObjectInfo::new(id, offset, size),
         }
     }
@@ -99,7 +118,7 @@ impl<T: Copy> RepCXLObject<T> {
         let (ack_tx, ack_rx) = mpsc::channel();
         let req = WriteRequest::new(self.info, data, ack_tx);
 
-        self.req_queue_tx
+        self.wreq_queue_tx
             .send(req)
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
         // std::thread::sleep(Duration::from_millis(10));
@@ -108,6 +127,21 @@ impl<T: Copy> RepCXLObject<T> {
             Ok(true) => Ok(()),
             Ok(false) => Err("Failed write operation".into()),
             Err(e) => Err(format!("Failed to receive ack: {}", e)),
+        }
+    }
+
+    pub fn read(&self) -> Result<ReadReturn<T>, String> {
+        let (ack_tx, ack_rx) = mpsc::channel();
+        let req = ReadRequest::new(self.info, ack_tx);
+        self.rreq_queue_tx
+            .send(req)
+            .map_err(|e| format!("Failed to send to object queue: {}", e))
+            .unwrap();
+
+        // wait for ack
+        match ack_rx.recv() {
+            Ok(return_val) => Ok(return_val)    ,
+            Err(e) => Err(format!("Failed to receive read ack: {}", e)),
         }
     }
 }
@@ -190,8 +224,10 @@ pub struct RepCXL<T> {
     num_of_objects: usize,
     view: GroupView,
     round_time: Duration,
-    req_queue_tx: mpsc::Sender<WriteRequest<T>>,
-    req_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
+    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
+    wreq_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
+    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
+    rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -205,8 +241,9 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
         view.processes.push(id); // add self to group
 
-        // dummy channel for init
-        let (tx, rx) = mpsc::channel();
+        // init read and write request queues
+        let (wtx, wrx) = mpsc::channel();
+        let (rtx, rrx) = mpsc::channel();
 
         RepCXL {
             id,
@@ -215,8 +252,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             num_of_objects: 0,
             view,
             round_time,
-            req_queue_tx: tx,
-            req_queue_rx: Some(rx),
+            wreq_queue_tx: wtx,
+            wreq_queue_rx: Some(wrx),
+            rreq_queue_tx: rtx,
+            rreq_queue_rx: Some(rrx),
         }
     }
 
@@ -296,10 +335,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                     node.write_state(state);
                 }
 
-                // clone the object transmission queue
-                let tx = self.req_queue_tx.clone();
+                // clone the request queues
+                let wtx = self.wreq_queue_tx.clone();
+                let rtx = self.rreq_queue_tx.clone();
                 // create the new RepCXLObject
-                let obj = RepCXLObject::new(id, offset, size, tx);
+                let obj = RepCXLObject::new(id, offset, size, wtx, rtx);
 
                 self.num_of_objects += 1;
                 return Some(obj);
@@ -333,7 +373,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         if let Some(oi) = state.object_index.lookup_object(id) {
             info!("Object found in shared state");
-            let obj = RepCXLObject::new(id, oi.offset, oi.size, self.req_queue_tx.clone());
+            let obj = RepCXLObject::new(id, oi.offset, oi.size, self.wreq_queue_tx.clone(), self.rreq_queue_tx.clone());
             return Some(obj);
         }
         None
@@ -379,13 +419,25 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             let v = self.view.clone();
             let rt = self.round_time;
 
-            // create object queue channel: move the receiver to the thread
-            // and keep the sender in state to assign to new objects
-            // let (tx, rx) = mpsc::channel();
-            let rx = self.req_queue_rx.take().expect("Receiver already taken");
-            std::thread::spawn(move || {
-                algorithms::from_string(algorithm)(v, start_time, rt, rx);
-            });
+            // for both read and write threads move the rx queue to the thread
+            // and keep the tx queue in state to assign to new objects
+            
+            // WRITE thread
+            {
+                let (algorithm, v) = (algorithm.clone(), v.clone());
+                let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+                std::thread::spawn(move || {
+                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx);
+                });
+            }
+
+            // READ thread
+            {
+                let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
+                std::thread::spawn(move || {
+                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx);
+                });
+            }
 
             // block until after start time
             std::thread::sleep(Duration::from_secs(2));

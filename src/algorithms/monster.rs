@@ -1,6 +1,8 @@
 use super::*;
 use crate::Wid;
 use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
+use crate::{ObjectMemoryEntry, ReadReturn};
+
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum MonsterState {
@@ -25,6 +27,7 @@ impl std::fmt::Display for MonsterState {
     } 
 }
 
+// 
 // logging macro with phase tag
 macro_rules! monster_info {
     ($tag:expr, $($arg:tt)*) => {
@@ -38,7 +41,7 @@ macro_rules! monster_error {
     };
 }
 
-pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
+pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     start_time: SystemTime,
     round_time: Duration,
@@ -200,4 +203,50 @@ pub fn monster<T: Copy + PartialEq + std::fmt::Debug>(
         (round_num, round_start) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
 
     }
+}
+
+/// MONSTER READ: 
+/// - pull read requests from queue (blocking) 
+/// - async read all memory nodes and return ReadSafe or ReadDirty based
+/// on state consistency
+pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
+    view: super::GroupView,
+    _start_time: SystemTime,
+    _round_time: Duration,
+    req_queue_rx: mpsc::Receiver<ReadRequest<T>>,
+) {
+    
+    loop {
+        match req_queue_rx.recv() {
+            Ok(req) => {
+                match mem_readall(req.obj_info.offset, &view.memory_nodes) {
+                    Ok(states) => {
+                        // check if all states are consistent (have the same wid (i.e. value))
+                        // and get the latest wid with one pass
+                        let (consistent, latest) = states.iter().skip(1).fold(
+                            (true, &states[0]),
+                            |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
+                        );
+                        // return based on consistency
+                        let result = if consistent {
+                            ReadReturn::ReadSafe(latest.value)
+                        } else {
+                            ReadReturn::ReadDirty(latest.value)
+                        };
+                        if let Err(e) = req.ack_tx.send(result) {
+                            error!("Failed to send read response: {}", e);
+                        }
+                    },
+                    Err(MemoryError(memory_node_id)) => {
+                        error!("Memory node {} failed during read", memory_node_id);
+                    }
+                }
+            },
+            Err(e) => {
+                warn!("Read request channel closed: {}", e);
+                break;
+            }
+        }
+    }
+
 }
