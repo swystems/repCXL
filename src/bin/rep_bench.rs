@@ -121,7 +121,7 @@ fn main() {
     // start repCXL process
     debug!("Starting RepCXL instance with id {}", id);
      let mut rcxl =
-        RepCXL::<u64>::new(id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
+        RepCXL::<u64>::new(id as usize, MEMORY_SIZE, CHUNK_SIZE);
 
     // open memory nodes
     for path in NODE_PATHS.iter() {
@@ -162,7 +162,7 @@ fn main() {
     }
 
 
-    rcxl.sync_start(algorithm);
+    rcxl.sync_start(algorithm, round_time);
 
     
     // start benchmark

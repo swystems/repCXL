@@ -12,10 +12,7 @@ use starting_block::StartingBlock;
 pub mod wcc;
 use wcc::ObjectWCC;
 
-
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
-
-
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SharedState {
@@ -44,7 +41,7 @@ impl SharedState {
 
 
 // @TODO: add type for addr since repcxl is currently type-specific?
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Hash, Clone)]
 pub(crate) struct MemoryNode {
     pub id: usize,
     state_addr: *mut SharedState,
