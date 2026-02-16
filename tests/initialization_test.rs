@@ -52,7 +52,7 @@ fn test_multiprocess_init() {
     let node_path = "/dev/shm/repCXL_test_multiprocess";
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
-    let mut repcxls = multi_rcxl(2, node_path);
+    let mut repcxls = multi_rcxl(2, vec![node_path]);
     
     // check the process view is consistent across instances
     repcxls[0].register_process(1);
@@ -77,7 +77,7 @@ fn test_object_lifecycle() {
     let node_path = "/dev/shm/repCXL_test_obj_lifecycle";
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
-    let mut repcxls = multi_rcxl(2, node_path);
+    let mut repcxls = multi_rcxl(2, vec![node_path]);
     repcxls[0].register_process(1);
     repcxls[1].register_process(0);
     

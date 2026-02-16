@@ -14,7 +14,7 @@ fn test_rw() {
     let val = 42;
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
-    let mut repcxls = multi_rcxl(2, node_path).into_iter();
+    let mut repcxls = multi_rcxl(2, vec![node_path]).into_iter();
     // get owned repCXL instances to move to threads later
     let mut repcxl0 = repcxls.next().unwrap();
     let mut repcxl1 = repcxls.next().unwrap();

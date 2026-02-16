@@ -100,6 +100,7 @@ impl<T> ReadRequest<T> {
     }
 }
 
+#[derive(Debug)]
 pub enum ReadReturn<T> {
     ReadSafe(T),
     ReadDirty(T),

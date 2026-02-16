@@ -237,6 +237,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
                     Ok(states) => {
                         // check if all states are consistent (have the same wid (i.e. value))
                         // and get the latest wid with one pass
+                        // println!("{:?}", states);
                         let (consistent, latest) = states.iter().skip(1).fold(
                             (true, &states[0]),
                             |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),

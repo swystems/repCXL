@@ -14,7 +14,21 @@ pub fn cleanup_tmpfs_file(path: &str) {
     let _ = std::fs::remove_file(path);
 }
 
-pub fn multi_rcxl(num: usize, node_path: &str) -> Vec<RepCXL<u64>> {
+
+pub fn single_rcxl(id: usize, node_paths: Vec<&str>) -> RepCXL<u64> {
+    let mut rcxl = RepCXL::<u64>::new(
+        id,
+        TEST_MEMORY_SIZE,
+        TEST_CHUNK_SIZE,
+    );
+    for np in &node_paths {
+        rcxl.add_memory_node_from_file(np);
+    }
+    rcxl.init_state();
+    rcxl
+}
+
+pub fn multi_rcxl(num: usize, node_paths: Vec<&str>) -> Vec<RepCXL<u64>> {
     let mut processes = Vec::new();
     for i in 0..num {
         let mut rcxl = RepCXL::<u64>::new(
@@ -22,7 +36,9 @@ pub fn multi_rcxl(num: usize, node_path: &str) -> Vec<RepCXL<u64>> {
             TEST_MEMORY_SIZE,
             TEST_CHUNK_SIZE,
         );
-        rcxl.add_memory_node_from_file(node_path);
+        for np in &node_paths {
+            rcxl.add_memory_node_from_file(np);
+        }
         rcxl.init_state();
         processes.push(rcxl);
     }

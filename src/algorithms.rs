@@ -44,7 +44,7 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
 ) {
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_read,
-        "monster_read" => monster::monster_read,
+        "monster" => monster::monster_read,
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }
