@@ -82,6 +82,7 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
             },
             Err(e) => {
                 log::info!("[READ] Read request channel closed: {}", e);
+                break; // exit thread
             }
         }
     }

@@ -210,7 +210,7 @@ fn main() {
     let mut lats_ns = Vec::new();
     let mut total_tputs = Vec::new();
 
-    // drop extra senders to make the recv loop exit
+    // drop extra senders to make the recv loop below exit later
     drop(lats_tx);
     drop(tput_tx);
 
@@ -228,7 +228,6 @@ fn main() {
         handle.join().unwrap();
     }
 
-    // drop extra senders to make the recv loop exit
     rcxl.stop();
 
     println!(

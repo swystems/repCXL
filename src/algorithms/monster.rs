@@ -96,7 +96,10 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                             // no request, stay in Try state
                         },
                         mpsc::TryRecvError::Disconnected => {
+                            // the repcxl instance keeps the original sender, 
+                            // so this should occur when the instance is dropped
                             monster_info!(monster_state, "request queue channel closed: {}", e);
+                            break;
                         }
                     }
                 }
@@ -253,8 +256,9 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
                     }
                 }
             },
-            Err(e) => {
+            Err(e) => { // the repcxl instance keeps the original sender, so this should occur when the instance is dropped 
                 log::info!("[READ] Read request channel closed: {}", e);
+                break; 
             }
         }
     }
