@@ -2,13 +2,13 @@ use std::time::{Duration, SystemTime};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use log::{error, warn};
-use crate::ObjectMemoryEntry;
-
+use crate::{ObjectMemoryEntry,ReadReturn};
+use safe_memio::{mem_readone, MemoryError};
 
 use super::*;
 
 
-pub fn async_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
+pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     _start_time: SystemTime,
     _round_time: Duration,
@@ -48,6 +48,40 @@ pub fn async_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
                         break; // exit thread
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Return a value from one memory node at random ASAP
+pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
+    view: crate::GroupView,
+    _start_time: SystemTime,
+    _round_time: Duration,
+    req_queue_rx: mpsc::Receiver<ReadRequest<T>>,
+    stop_flag: Arc<AtomicBool>,
+) {
+
+     loop {
+        if stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
+        match req_queue_rx.recv() {
+            Ok(req) => {
+                match mem_readone(req.obj_info.offset, &view.memory_nodes) {
+                    Ok(ome) => {
+                        let result = ReadReturn::ReadDirty(ome.value);
+                        if let Err(e) = req.ack_tx.send(result) {
+                            error!("Failed to send read response: {}", e);
+                        }
+                    },
+                    Err(MemoryError(memory_node_id)) => {
+                        error!("Memory node {} failed during read", memory_node_id);
+                    }
+                }
+            },
+            Err(e) => {
+                log::info!("[READ] Read request channel closed: {}", e);
             }
         }
     }
