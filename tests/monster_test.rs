@@ -239,7 +239,7 @@ fn test_states_single_write() {
     // The log must contain the expected subsequence for a successful write:
     //   Try (picks up the request)  →  Check  →  Replicate  →  Try (back to idle)
     let states = logger::Logger::new(log_path).read_monster_states();
-    println!("{:?}", states);
+    // println!("{:?}", states);
     let correct_transition = check_state_transitions(&states, &["Try", "Check", "Replicate"]);
     assert!(correct_transition, "State transitions should match expected pattern");
     let incorrect_transition = check_state_transitions(&states, &["Try", "Check", "Try", "Try"]);
@@ -284,10 +284,10 @@ fn test_states_write_conflict() {
     rcxl1.sync_start(ALGORITHM.to_string(), ROUND_TIME);
     let _ = obj_replica.write(99);
 
-    let coord_states = logger::Logger::new(log_path0).read_monster_states();
-    println!("{:?}", coord_states);
+    // let coord_states = logger::Logger::new(log_path0).read_monster_states();
+    // println!("{:?}", coord_states);
     let replica_states = logger::Logger::new(log_path1).read_monster_states();
-    println!("{:?}", replica_states);
+    // println!("{:?}", replica_states);
     let correct_transition = check_state_transitions(&replica_states, &["Try", "Check", "Wait", "PostConflictCheck"]);
     assert!(correct_transition, "Incorrect transition sequence in {}", replica_states.join(" -> "));
     let incorrect_transition = check_state_transitions(&replica_states, &["Try", "Check", "Replicate", "Try"]);
@@ -334,10 +334,10 @@ fn test_states_write_conflict_then_error() {
     rcxl1.sync_start(ALGORITHM.to_string(), ROUND_TIME);
     let _ = obj_replica.write(99);
 
-    let coord_states = logger::Logger::new(log_path0).read_monster_states();
-    println!("{:?}", coord_states);
+    // let coord_states = logger::Logger::new(log_path0).read_monster_states();
+    // println!("{:?}", coord_states);
     let replica_states = logger::Logger::new(log_path1).read_monster_states();
-    println!("{:?}", replica_states);
+    // println!("{:?}", replica_states);
     let correct_transition = check_state_transitions(&replica_states, &["Try", "Check", "Wait", "PostConflictCheck", "Retry"]);
     assert!(correct_transition, "Incorrect transition sequence in {}", replica_states.join(" -> "));
     let incorrect_transition = check_state_transitions(&replica_states, &["Try", "Check", "Replicate", "Try"]);
