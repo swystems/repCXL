@@ -121,7 +121,7 @@ fn main() {
     // start repCXL process
     debug!("Starting RepCXL instance with id {}", id);
      let mut rcxl =
-        RepCXL::<u64>::new(id as usize, MEMORY_SIZE, CHUNK_SIZE, round_time);
+        RepCXL::<u64>::new(id as usize, MEMORY_SIZE, CHUNK_SIZE);
 
     // open memory nodes
     for path in NODE_PATHS.iter() {
@@ -162,7 +162,7 @@ fn main() {
     }
 
 
-    rcxl.sync_start(algorithm);
+    rcxl.sync_start(algorithm, round_time);
 
     
     // start benchmark
@@ -210,7 +210,7 @@ fn main() {
     let mut lats_ns = Vec::new();
     let mut total_tputs = Vec::new();
 
-    // drop extra senders to make the recv loop exit
+    // drop extra senders to make the recv loop below exit later
     drop(lats_tx);
     drop(tput_tx);
 
@@ -228,7 +228,6 @@ fn main() {
         handle.join().unwrap();
     }
 
-    // drop extra senders to make the recv loop exit
     rcxl.stop();
 
     println!(

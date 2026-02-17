@@ -11,19 +11,20 @@ use std::time::Duration;
 mod algorithms;
 mod safe_memio;
 mod shmem;
+pub mod logger;
 use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
 
 
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
-const MAX_OBJECTS: usize = 128; // Maximum number of objects
+pub const MAX_OBJECTS: usize = 128; // Maximum number of objects
 
 /// The current membership of the group. Stores both the
 /// processes and the memory nodes present in the system at a given time.
 #[derive(Clone)]
-struct GroupView {
+pub struct GroupView {
     self_id: usize, // process ID of this instance
-    processes: Vec<usize>,
+    pub processes: Vec<usize>,
     memory_nodes: Vec<MemoryNode>,
 }
 
@@ -56,7 +57,19 @@ impl GroupView {
         self.memory_nodes.iter().min_by_key(|n| n.id)
     }
 }
-
+impl PartialEq for GroupView {
+    fn eq(&self, other: &Self) -> bool {
+        use std::collections::HashSet;
+        
+        let self_procs: HashSet<_> = self.processes.iter().collect();
+        let other_procs: HashSet<_> = other.processes.iter().collect();
+        
+        let self_nodes: HashSet<_> = self.memory_nodes.iter().map(|n| n.id).collect();
+        let other_nodes: HashSet<_> = other.memory_nodes.iter().map(|n| n.id).collect();
+        
+        self_procs == other_procs && self_nodes == other_nodes
+    }
+}
 pub struct WriteRequest<T> {
     pub(crate) obj_info: ObjectInfo,
     pub data: T,
@@ -88,6 +101,7 @@ impl<T> ReadRequest<T> {
     }
 }
 
+#[derive(Debug)]
 pub enum ReadReturn<T> {
     ReadSafe(T),
     ReadDirty(T),
@@ -224,16 +238,16 @@ pub struct RepCXL<T> {
     chunk_size: usize, // Size of each chunk in bytes
     num_of_objects: usize,
     view: GroupView,
-    round_time: Duration,
     wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
     wreq_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
     rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
     stop_flag: Arc<AtomicBool>,
+    logger: Option<logger::Logger>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
-    pub fn new(id: usize, size: usize, chunk_size: usize, round_time: Duration) -> Self {
+    pub fn new(id: usize, size: usize, chunk_size: usize) -> Self {
         let chunks = (size + chunk_size - 1) / chunk_size;
         let total_size = chunks * chunk_size;
 
@@ -253,20 +267,28 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             chunk_size,
             num_of_objects: 0,
             view,
-            round_time,
             wreq_queue_tx: wtx,
             wreq_queue_rx: Some(wrx),
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
             stop_flag: Arc::new(AtomicBool::new(false)),
+            logger: None,
         }
+    }
+
+    /// Enable state logging to a file. Clears any existing log at the path.
+    /// The algorithm thread will append state transitions to this file.
+    pub fn enable_log(&mut self, path: &str) {
+        let mut log = logger::Logger::new(path);
+        log.clear();
+        self.logger = Some(log);
     }
 
     pub fn register_process(&mut self, pid: usize) {
         self.view.add_process(pid);
     }
 
-    pub fn is_coordinator(&mut self) -> bool {
+    pub fn is_coordinator(&self) -> bool {
         self.view.get_coordinator() == Some(self.id)
     }
 
@@ -283,6 +305,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         for node in &self.view.memory_nodes {
             node.write_state(state);
         }
+    }
+
+    pub fn get_view(&self) -> GroupView {
+        self.view.clone()
     }
 
     fn read_state_from_any(&self) -> Result<SharedState, &str> {
@@ -355,6 +381,13 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     }
 
     pub fn remove_object(&mut self, id: usize) {
+
+        if !self.is_coordinator() {
+            error!("Only the coordinator can remove objects");
+            return;
+        }
+
+
         let mut state = self.read_state_from_any().unwrap();
         state.object_index.dealloc_object(id);
 
@@ -386,8 +419,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// **assumes sync'ed clocks**
     /// All processes must call this function with the same group view to
     /// ensure consistency.
-    pub fn sync_start(&mut self, algorithm: String) {
-        if let Some(coord) = self.view.get_coordinator() {
+    pub fn sync_start(&mut self, algorithm: String, rt: Duration) {
+        if let Some(_coord) = self.view.get_coordinator() {
             let mstate = self.get_state_from_master().unwrap();
             let sblock = mstate.get_starting_block();
             let start_time;
@@ -396,7 +429,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             info!("Process {} marked as ready.", self.id);
 
             loop {
-                if coord == self.id {
+                if self.is_coordinator() {
                     // info!("Process {} is the coordinator", self.id);
 
                     // check if all processes are ready
@@ -420,7 +453,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             }
 
             let v = self.view.clone();
-            let rt = self.round_time;
+            // let rt = self.round_time;
 
             // for both read and write threads move the rx queue to the thread
             // and keep the tx queue in state to assign to new objects
@@ -428,9 +461,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // WRITE thread
             {
                 let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
+                let logger = self.logger.take();
                 let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
                 std::thread::spawn(move || {
-                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop);
+                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
                 });
             }
 
@@ -444,7 +478,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             }
 
             // block until after start time
-            std::thread::sleep(Duration::from_secs(2));
+            // std::thread::sleep(Duration::from_secs(2));
         } else {
             error!("FATAL: No coordinator found in group");
             return;

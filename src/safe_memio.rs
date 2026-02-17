@@ -8,6 +8,7 @@
 //!
 
 use rand::Rng;
+use rand::prelude::IndexedRandom;  // Enables choose() on slices
 use crate::ObjectMemoryEntry;
 use crate::shmem::MemoryNode;
 use log::error;
@@ -40,6 +41,23 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
     unsafe { Ok(std::ptr::read(addr)) }
 }
 
+/// Read the value from all memory nodes for the given object
+pub fn mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
+
+    let node = mem_nodes.choose(&mut rand::rng()).unwrap();  // Returns Option<&T>
+
+    let addr = node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    match safe_read(addr) {
+        Ok(ome) => return Ok(ome),
+        Err(e) => {
+            error!(
+                "Safe read failed. Node {}, offset {}: {}",
+                node.id, offset, e
+            );
+            return Err(MemoryError(node.id));
+        }
+    }
+}
 
 /// Write the an ObjectMemoryEntry to all memory nodes at its given memory offset 
 pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes: &Vec<MemoryNode>) -> Result<(), MemoryError> {

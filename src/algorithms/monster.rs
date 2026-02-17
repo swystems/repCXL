@@ -4,11 +4,12 @@ use std::sync::Arc;
 use super::*;
 use crate::Wid;
 use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
+use crate::logger;
 use crate::{ObjectMemoryEntry, ReadReturn};
 
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum MonsterState {
+pub enum MonsterState {
     Try,
     Retry,
     Check,
@@ -50,8 +51,9 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
+    mut logger_opt: Option<logger::Logger>,
 ) {
-    let mut round_num = 0;
+    let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
     let mut monster_state = MonsterState::Try;
 
     // MONSTER loop vars
@@ -78,6 +80,11 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             oid
         );
 
+        // Log state transition if logging is enabled
+        if let Some(ref mut logger) = logger_opt {
+            logger.log_monster(round_num, monster_state, oid);
+        }
+
         match monster_state {
             MonsterState::Try => {
                 match req_queue_rx.try_recv() {
@@ -96,7 +103,10 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                             // no request, stay in Try state
                         },
                         mpsc::TryRecvError::Disconnected => {
+                            // the repcxl instance keeps the original sender, 
+                            // so this should occur when the instance is dropped
                             monster_info!(monster_state, "request queue channel closed: {}", e);
+                            break;
                         }
                     }
                 }
@@ -178,7 +188,8 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                 
                 match mem_readall(req.obj_info.offset, &view.memory_nodes) {
                     Ok(omes) => {
-                        // Check if any wid in omes is smaller than the current wid
+                        // Check if any wid in omes is smaller than the current
+                        // wid
                         let any_smaller = omes.iter().any(|ome: &ObjectMemoryEntry<T>| ome.wid < wid);
 
                         if any_smaller {                            
@@ -187,14 +198,15 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                                 wid, req.obj_info.id
                             );
 
+
+                            monster_state = MonsterState::Retry; 
+                        } else {
+                            monster_info!(monster_state, "State up to date");
                             // send ack to client
                             if let Err(_) = req.ack_tx.send(true) {
                                 error!("Failed to send ack");
                             }   
 
-                            monster_state = MonsterState::Retry; 
-                        } else {
-                            monster_info!(monster_state, "State up to date");
                             pending_req = None;
                             monster_state = MonsterState::Try;
                         }
@@ -234,6 +246,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
                     Ok(states) => {
                         // check if all states are consistent (have the same wid (i.e. value))
                         // and get the latest wid with one pass
+                        // println!("{:?}", states);
                         let (consistent, latest) = states.iter().skip(1).fold(
                             (true, &states[0]),
                             |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
@@ -253,8 +266,9 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
                     }
                 }
             },
-            Err(e) => {
+            Err(e) => { // the repcxl instance keeps the original sender, so this should occur when the instance is dropped 
                 log::info!("[READ] Read request channel closed: {}", e);
+                break; 
             }
         }
     }

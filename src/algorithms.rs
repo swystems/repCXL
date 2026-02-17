@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use crate::safe_memio;
 use crate::GroupView;
 use crate::{WriteRequest,ReadRequest};
-
+use crate::logger::Logger;
 
 pub mod best_effort;
 pub mod monster;
@@ -24,9 +24,10 @@ pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     Duration,
     mpsc::Receiver<WriteRequest<T>>,
     Arc<AtomicBool>,
+    Option<Logger>,
 ) {
     match algorithm.as_str() {
-        "async_best_effort" => best_effort::async_best_effort,
+        "async_best_effort" => best_effort::async_best_effort_write,
         "sync_best_effort" => best_effort::sync_best_effort,
         "monster" => monster::monster_write,
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
@@ -43,7 +44,8 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     Arc<AtomicBool>,
 ) {
     match algorithm.as_str() {
-        "monster_read" => monster::monster_read,
+        "async_best_effort" => best_effort::async_best_effort_read,
+        "monster" => monster::monster_read,
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }
