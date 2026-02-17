@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use log::{error, warn};
 use crate::{ObjectMemoryEntry,ReadReturn};
+use crate::logger::Logger;
 use safe_memio::{mem_readone, MemoryError};
 
 use super::*;
@@ -14,6 +15,7 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     _round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
+    _log_path: Option<Logger>,
 ) {
 
     loop {
@@ -95,6 +97,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
+    _logger: Option<Logger>,
 ) {
     
     let mut round_num = 0;

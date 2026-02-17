@@ -11,6 +11,7 @@ use std::time::Duration;
 mod algorithms;
 mod safe_memio;
 mod shmem;
+pub mod logger;
 use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
 
@@ -242,6 +243,7 @@ pub struct RepCXL<T> {
     rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
     stop_flag: Arc<AtomicBool>,
+    logger: Option<logger::Logger>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -270,14 +272,23 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
             stop_flag: Arc::new(AtomicBool::new(false)),
+            logger: None,
         }
+    }
+
+    /// Enable state logging to a file. Clears any existing log at the path.
+    /// The algorithm thread will append state transitions to this file.
+    pub fn enable_log(&mut self, path: &str) {
+        let mut log = logger::Logger::new(path);
+        log.clear();
+        self.logger = Some(log);
     }
 
     pub fn register_process(&mut self, pid: usize) {
         self.view.add_process(pid);
     }
 
-    pub fn is_coordinator(&mut self) -> bool {
+    pub fn is_coordinator(&self) -> bool {
         self.view.get_coordinator() == Some(self.id)
     }
 
@@ -409,7 +420,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// All processes must call this function with the same group view to
     /// ensure consistency.
     pub fn sync_start(&mut self, algorithm: String, rt: Duration) {
-        if let Some(coord) = self.view.get_coordinator() {
+        if let Some(_coord) = self.view.get_coordinator() {
             let mstate = self.get_state_from_master().unwrap();
             let sblock = mstate.get_starting_block();
             let start_time;
@@ -418,7 +429,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             info!("Process {} marked as ready.", self.id);
 
             loop {
-                if coord == self.id {
+                if self.is_coordinator() {
                     // info!("Process {} is the coordinator", self.id);
 
                     // check if all processes are ready
@@ -450,9 +461,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // WRITE thread
             {
                 let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
+                let logger = self.logger.take();
                 let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
                 std::thread::spawn(move || {
-                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop);
+                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
                 });
             }
 
@@ -466,7 +478,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             }
 
             // block until after start time
-            std::thread::sleep(Duration::from_secs(2));
+            // std::thread::sleep(Duration::from_secs(2));
         } else {
             error!("FATAL: No coordinator found in group");
             return;
