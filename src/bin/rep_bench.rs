@@ -8,18 +8,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use rep_cxl::utils::arg_parser::ArgParser;
 
-// @todo: move to RepCXLConfig
-const NODE_PATHS: [&str; 3] = [
-    "/dev/shm/repCXL_test1",
-    "/dev/shm/repCXL_test2",
-    "/dev/shm/repCXL_test3",
-];
-const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
-const CHUNK_SIZE: usize = 64; // 64 bytes
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
 
 // BENCHMARK DEFAULTS
-const DEFAULT_ATTEMPTS: &str = "100";
+const DEFAULT_ATTEMPTS: &str = "1000";
 const DEFAULT_CLIENTS: &str = "1";
 const DEFAULT_OBJECTS: &str = "100";
 
@@ -37,8 +29,8 @@ fn main() {
     // Initialize the logger
     simple_logger::init().unwrap();
 
-    // Parse benchmark-specific args
-    let mut ap = ArgParser::new("rep_bench", "Consistent Latency replication over CXL");
+    // Parse repcxl and benchmark-specific args
+    let mut ap = ArgParser::new("rep_bench", "test replication performance of repCXL");
     ap.add_args(&[
         Arg::new("attempts")
             .short('a')
@@ -47,7 +39,7 @@ fn main() {
             .default_value(DEFAULT_ATTEMPTS)
             .value_parser(value_parser!(u32)),
         Arg::new("clients")
-            .short('c')
+            .short('C')
             .long("clients")
             .help("Number of clients issuing requests to the current repCXL process. Must be the same for all repCXL processes")
             .default_value(DEFAULT_CLIENTS)
@@ -71,10 +63,10 @@ fn main() {
     // start repCXL process
     debug!("Starting RepCXL instance with id {}", config.id);
      let mut rcxl =
-        RepCXL::<u64>::new(config.id as usize, MEMORY_SIZE, CHUNK_SIZE);
+        RepCXL::<u64>::new(config.id as usize, config.mem_size, config.chunk_size);
 
     // open memory nodes
-    for path in NODE_PATHS.iter() {
+    for path in config.mem_nodes.iter() {
         rcxl.add_memory_node_from_file(path);
     }
 
@@ -112,7 +104,7 @@ fn main() {
     }
 
 
-    rcxl.sync_start(config.algorithm, config.round_time);
+    rcxl.sync_start(config.algorithm, std::time::Duration::from_nanos(config.round_time));
 
     
     // start benchmark

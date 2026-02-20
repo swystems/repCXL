@@ -4,17 +4,15 @@
 // the same set of parameters can be supplied via file instead of flags.
 
 use std::fs;
-use std::time::Duration;
-
 use log::error;
 use serde::Deserialize;
 
-const DEFAULT_ATTEMPTS: u32 = 100;
-const DEFAULT_CLIENTS: u32 = 1;
-const DEFAULT_OBJECTS: u32 = 100;
+const DEFAULT_MEM_SIZE: usize = 1024 * 1024; // 1 MiB
+const DEFAULT_CHUNK_SIZE: usize = 64; // 64 bytes
 const DEFAULT_PROCESSES: u32 = 1;
 const DEFAULT_ROUND_TIME_NS: u64 = 1000000; //1ms
 const DEFAULT_ALGORITHM: &str = "monster";
+
 
 /// Raw deserialized representation of the TOML config file.
 /// All fields are optional during deserialization  missing fields keep their 
@@ -22,7 +20,10 @@ const DEFAULT_ALGORITHM: &str = "monster";
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct RepCXLConfig {
-    pub round_time: Duration,
+    pub mem_nodes: Vec<String>,
+    pub mem_size: usize,
+    pub chunk_size: usize,
+    pub round_time: u64,
     pub id: i32,
     pub processes: u32,
     pub algorithm: String,
@@ -31,7 +32,10 @@ pub struct RepCXLConfig {
 impl Default for RepCXLConfig {
     fn default() -> Self {
         Self {
-            round_time: Duration::from_nanos(DEFAULT_ROUND_TIME_NS),
+            mem_nodes: Vec::new(),
+            mem_size: DEFAULT_MEM_SIZE,
+            chunk_size: DEFAULT_CHUNK_SIZE,
+            round_time: DEFAULT_ROUND_TIME_NS,
             id: -1, // -1 indicates no id provided in config file
             processes: DEFAULT_PROCESSES,
             algorithm: DEFAULT_ALGORITHM.to_string(),
@@ -60,14 +64,21 @@ impl RepCXLConfig {
 
     /// Validate the config values. Exits if any value is invalid.
     pub fn validate(&self) {
+        // must specify id
         if self.id < 0 {
-            error!("id must be provided in the config file");
+            error!("id must be provided in the config");
             std::process::exit(1);
         }
 
         if self.id as u32 >= self.processes {
             error!("id must be less than the number of processes");
             error!("id: {}, # of processes: {}", self.id, self.processes);
+            std::process::exit(1);
+        }
+
+        // must specify at least one node
+        if self.mem_nodes.is_empty() {
+            error!("at least one memory node must be specified in the config");
             std::process::exit(1);
         }
     }

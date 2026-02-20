@@ -1,10 +1,7 @@
 // Parse command line arguments for RepCXL binaries and benchmarks
 
 use clap::{Arg, value_parser};
-use std::time::Duration;
-
 use super::config::RepCXLConfig;
-
 
 #[derive(Debug)]
 pub struct ArgParser {
@@ -43,7 +40,7 @@ impl ArgParser {
             .about(&self.about)
             .arg(
                 Arg::new("config")
-                    .short('C')
+                    .short('c')
                     .long("config")
                     .help("Path to a TOML config file. Mutually exclusive with all other default arguments")
                     .value_parser(value_parser!(String)),
@@ -85,7 +82,7 @@ impl ArgParser {
 
         // Parse individual CLI arguments
         if let Some(round_time_ns) = matches.remove_one::<u64>("round_time") {
-            self.config.round_time = Duration::from_nanos(round_time_ns);
+            self.config.round_time = round_time_ns;
         }
         if let Some(id) = matches.remove_one::<u32>("id") {
             self.config.id = id as i32;

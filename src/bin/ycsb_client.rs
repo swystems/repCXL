@@ -4,7 +4,11 @@
 use rep_cxl::utils::ycsb::load_ycsb_workload;
 use rep_cxl::utils::arg_parser::ArgParser;
 use clap::{Arg, value_parser};
+use log::info;
 fn main() {
+
+    simple_logger::init().unwrap();
+
     let mut ap = ArgParser::new( "ycsb_client", "YCSB Client for RepCXL" ); 
     
     // Add benchmark-specific arguments
@@ -31,23 +35,23 @@ fn main() {
     let workload = load_ycsb_workload(load_trace, run_trace);
     workload.summary();
 
-    println!("\nFirst 5 load operations:");
+    info!("\nFirst 5 load operations:");
     for (i, op) in workload.load_ops.iter().enumerate().take(5) {
         let val_preview: String = op.fields.first()
             .map(|(name, val)| format!(" {}=[{}B]", name, val.len()))
             .unwrap_or_default();
-        println!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
+        info!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
     }
 
-    println!("\nFirst 10 run operations:");
+    info!("\nFirst 10 run operations:");
     for (i, op) in workload.run_ops.iter().enumerate().take(10) {
         let val_preview: String = op.fields.first()
             .map(|(name, val)| format!(" {}=[{}B]", name, val.len()))
             .unwrap_or_default();
-        println!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
+        info!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
     }
     if workload.run_ops.len() > 10 {
-        println!("  ... ({} more)", workload.run_ops.len() - 10);
+        info!("  ... ({} more)", workload.run_ops.len() - 10);
     }
 
     
