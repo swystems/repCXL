@@ -1,0 +1,26 @@
+# RepCXL configuration file
+# Usage: <binary> -C config/example.toml
+#
+# All fields are optional — omitted fields use their defaults.
+
+# Unique identifier for the repCXL instance (required in practice)
+id = 0
+
+# Number of total repCXL processes
+processes = 1
+
+# Number of clients issuing requests per repCXL process
+clients = 1
+
+# Number of benchmark iterations
+attempts = 100
+
+# Number of objects to create
+objects = 100
+
+# Duration of the synchronous replication round (in nanoseconds)
+# 1_000_000 = 1 ms
+round_time_ns = 1000000
+
+# Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
+algorithm = "monster"

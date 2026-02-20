@@ -12,6 +12,7 @@ mod algorithms;
 mod safe_memio;
 mod shmem;
 pub mod logger;
+pub mod utils;
 use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
 
