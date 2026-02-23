@@ -11,7 +11,7 @@ use rep_cxl::utils::arg_parser::ArgParser;
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
 
 // BENCHMARK DEFAULTS
-const DEFAULT_ATTEMPTS: &str = "1000";
+const DEFAULT_ATTEMPTS: &str = "100000";
 const DEFAULT_CLIENTS: &str = "1";
 const DEFAULT_OBJECTS: &str = "100";
 
@@ -63,22 +63,14 @@ fn main() {
     // start repCXL process
     debug!("Starting RepCXL instance with id {}", config.id);
      let mut rcxl =
-        RepCXL::<u64>::new(config.id as usize, config.mem_size, config.chunk_size);
+        RepCXL::<u64>::new(config);
 
-    // open memory nodes
-    for path in config.mem_nodes.iter() {
-        rcxl.add_memory_node_from_file(path);
-    }
 
-    // add processes to initial group view
-    for process in 0..config.processes {
-        rcxl.register_process(process as usize);
-    }
 
     let mut objects = Vec::new();
     // only the coordinator manages the state
     if rcxl.is_coordinator() {
-        debug!("Starting as coordinator with id {}", rcxl.id);
+        debug!("Starting as coordinator with id {}", rcxl.config.id);
         rcxl.init_state();
 
         for i in 0..num_of_objects {
@@ -89,7 +81,7 @@ fn main() {
     }
     // Replica
     else {
-        debug!("Starting as replica with id {}", rcxl.id);
+        debug!("Starting as replica with id {}", rcxl.config.id);
 
         for i in 0..num_of_objects {
             // try until the coordinator creates the object
@@ -103,9 +95,11 @@ fn main() {
         }
     }
 
+    rcxl.sync_start(rcxl.config.algorithm.clone(), 
+        std::time::Duration::from_nanos(rcxl.config.round_time));
 
-    rcxl.sync_start(config.algorithm, std::time::Duration::from_nanos(config.round_time));
-
+    // wait for all processes to start up before starting benchmark
+    std::thread::sleep(Duration::from_nanos(rcxl.config.startup_delay));
     
     // start benchmark
     let objects = Arc::new(objects);
@@ -181,7 +175,7 @@ fn main() {
     let mem_max = lats_ns.iter().max().unwrap();
     let mem_min = lats_ns.iter().min().unwrap();
 
-    println!("Round time {:?}, {attempts} runs", config.round_time);
+    println!("Round time {:?}, {attempts} runs", rcxl.config.round_time);
     println!("Latency Avg: {:?}", Duration::from_nanos(mem_avg as u64));
     println!("Latency Min: {:?}", Duration::from_nanos(*mem_min as u64));
     println!(

@@ -9,23 +9,26 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 mod algorithms;
+pub mod logger;
 mod safe_memio;
 mod shmem;
-pub mod logger;
 pub mod utils;
 use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
+pub mod config;
+pub use config::RepCXLConfig;
 
-
+// Limits
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
 pub const MAX_OBJECTS: usize = 128; // Maximum number of objects
+
 
 /// The current membership of the group. Stores both the
 /// processes and the memory nodes present in the system at a given time.
 #[derive(Clone)]
 pub struct GroupView {
     self_id: usize, // process ID of this instance
-    pub processes: Vec<usize>,
+    pub processes: Vec<u32>,
     memory_nodes: Vec<MemoryNode>,
 }
 
@@ -40,7 +43,7 @@ impl GroupView {
         }
     }
 
-    fn add_process(&mut self, pid: usize) {
+    fn add_process(&mut self, pid: u32) {
         if !self.processes.contains(&pid) {
             self.processes.push(pid);
         } else {
@@ -49,7 +52,7 @@ impl GroupView {
     }
 
     // Returns the process with the lowest ID as the coordinator
-    fn get_coordinator(&self) -> Option<usize> {
+    fn get_coordinator(&self) -> Option<u32> {
         self.processes.iter().min().cloned()
     }
 
@@ -61,13 +64,13 @@ impl GroupView {
 impl PartialEq for GroupView {
     fn eq(&self, other: &Self) -> bool {
         use std::collections::HashSet;
-        
+
         let self_procs: HashSet<_> = self.processes.iter().collect();
         let other_procs: HashSet<_> = other.processes.iter().collect();
-        
+
         let self_nodes: HashSet<_> = self.memory_nodes.iter().map(|n| n.id).collect();
         let other_nodes: HashSet<_> = other.memory_nodes.iter().map(|n| n.id).collect();
-        
+
         self_procs == other_procs && self_nodes == other_nodes
     }
 }
@@ -156,7 +159,7 @@ impl<T: Copy> RepCXLObject<T> {
 
         // wait for ack
         match ack_rx.recv() {
-            Ok(return_val) => Ok(return_val)    ,
+            Ok(return_val) => Ok(return_val),
             Err(e) => Err(format!("Failed to receive read ack: {}", e)),
         }
     }
@@ -210,7 +213,7 @@ impl Wid {
     }
 }
 
-/// ObjectMemoryEntry. Stores the current write ID and the value of the object 
+/// ObjectMemoryEntry. Stores the current write ID and the value of the object
 /// in memory.
 #[derive(Debug, Clone, Copy)]
 struct ObjectMemoryEntry<T> {
@@ -234,9 +237,7 @@ impl<T: Copy> ObjectMemoryEntry<T> {
 /// Main RepCXL structure in local memory/cache for each process
 /// current version only supports objects of type T
 pub struct RepCXL<T> {
-    pub id: usize,
-    pub size: usize,
-    chunk_size: usize, // Size of each chunk in bytes
+    pub config: RepCXLConfig,
     num_of_objects: usize,
     view: GroupView,
     wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
@@ -248,24 +249,37 @@ pub struct RepCXL<T> {
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
-    pub fn new(id: usize, size: usize, chunk_size: usize) -> Self {
-        let chunks = (size + chunk_size - 1) / chunk_size;
-        let total_size = chunks * chunk_size;
 
-        let mut view = GroupView::new(id);
-        if id >= MAX_PROCESSES {
-            panic!("Process ID must be between 0 and {}", MAX_PROCESSES - 1);
+    /// Create a new empty repCXL instance
+    pub fn new(config: RepCXLConfig) -> Self {
+
+        // config should be validated at arg parsing but paranoia
+        if let Err(e) = config.validate() {
+            panic!("Invalid configuration: {}", e);
         }
-        view.processes.push(id); // add self to group
+        // add processes to view
+        let mut view = GroupView::new(config.id as usize);
+        view.processes = config.processes.clone(); // add all processes to group view
+
+        // open memory nodes
+        for path in config.mem_nodes.iter() {
+            let mnid = view.memory_nodes.len();
+            let node = MemoryNode::from_file(mnid, path, config.mem_size);
+            view.memory_nodes.push(node);
+        }
+
+        // init shared state
+        let state = SharedState::new(config.mem_size, config.chunk_size);
+        for node in &view.memory_nodes {
+            node.write_state(state);
+        }
 
         // init read and write request queues
         let (wtx, wrx) = mpsc::channel();
         let (rtx, rrx) = mpsc::channel();
 
         RepCXL {
-            id,
-            size: total_size,
-            chunk_size,
+            config,
             num_of_objects: 0,
             view,
             wreq_queue_tx: wtx,
@@ -277,6 +291,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
     }
 
+
     /// Enable state logging to a file. Clears any existing log at the path.
     /// The algorithm thread will append state transitions to this file.
     pub fn enable_log(&mut self, path: &str) {
@@ -285,22 +300,22 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         self.logger = Some(log);
     }
 
-    pub fn register_process(&mut self, pid: usize) {
+    pub fn register_process(&mut self, pid: u32) {
         self.view.add_process(pid);
     }
 
     pub fn is_coordinator(&self) -> bool {
-        self.view.get_coordinator() == Some(self.id)
+        self.view.get_coordinator() == Some(self.config.id as u32)
     }
 
     pub fn add_memory_node_from_file(&mut self, path: &str) {
         let id = self.view.memory_nodes.len();
-        let node = MemoryNode::from_file(id, path, self.size);
+        let node = MemoryNode::from_file(id, path, self.config.mem_size);
         self.view.memory_nodes.push(node);
     }
 
     pub fn init_state(&mut self) {
-        let state = SharedState::new(self.size, self.chunk_size);
+        let state = SharedState::new(self.config.mem_size, self.config.chunk_size);
 
         // Write the shared state to each memory node
         for node in &self.view.memory_nodes {
@@ -382,12 +397,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     }
 
     pub fn remove_object(&mut self, id: usize) {
-
         if !self.is_coordinator() {
             error!("Only the coordinator can remove objects");
             return;
         }
-
 
         let mut state = self.read_state_from_any().unwrap();
         state.object_index.dealloc_object(id);
@@ -410,7 +423,13 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         if let Some(oi) = state.object_index.lookup_object(id) {
             info!("Object found in shared state");
-            let obj = RepCXLObject::new(id, oi.offset, oi.size, self.wreq_queue_tx.clone(), self.rreq_queue_tx.clone());
+            let obj = RepCXLObject::new(
+                id,
+                oi.offset,
+                oi.size,
+                self.wreq_queue_tx.clone(),
+                self.rreq_queue_tx.clone(),
+            );
             return Some(obj);
         }
         None
@@ -426,8 +445,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             let sblock = mstate.get_starting_block();
             let start_time;
             // mark self as ready
-            sblock.mark_ready(self.id);
-            info!("Process {} marked as ready.", self.id);
+            sblock.mark_ready(self.config.id as usize);
+            info!("Process {} marked as ready.", self.config.id);
 
             loop {
                 if self.is_coordinator() {
@@ -445,12 +464,12 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                     start_time = sblock.get_start_time().unwrap();
                     info!(
                         "Process {} sees round starting time set to {:?}",
-                        self.id, start_time
+                        self.config.id, start_time
                     );
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(100));
-                debug!("Process {} waiting for start...", self.id);
+                debug!("Process {} waiting for start...", self.config.id);
             }
 
             let v = self.view.clone();
@@ -458,7 +477,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
             // for both read and write threads move the rx queue to the thread
             // and keep the tx queue in state to assign to new objects
-            
+
             // WRITE thread
             {
                 let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
@@ -487,7 +506,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     }
 
     pub fn stop(&self) {
-        info!("Stopping repCXL process {}. Goodbye...", self.id);
+        info!("Stopping repCXL process {}. Goodbye...", self.config.id);
         self.stop_flag.store(true, Ordering::Relaxed);
     }
 }

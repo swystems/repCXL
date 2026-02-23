@@ -51,7 +51,7 @@ fn test_rw() {
 
     cleanup_tmpfs_file(node_path);
 
-    std::thread::sleep(Duration::from_secs(10));
+    // std::thread::sleep(Duration::from_secs(10));
  
     // write and read threads stop after the test ends and the repCXL instances 
     // are dropped. Cannot explicitly stop them here because threads own 

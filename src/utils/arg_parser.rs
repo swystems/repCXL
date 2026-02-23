@@ -1,7 +1,7 @@
 // Parse command line arguments for RepCXL binaries and benchmarks
 use clap::{Arg, value_parser};
-use super::config::RepCXLConfig;
-use log::{info, error};
+use crate::config::RepCXLConfig;
+use log::error;
 
 #[derive(Debug)]
 pub struct ArgParser {
@@ -50,6 +50,13 @@ impl ArgParser {
                     .value_parser(value_parser!(String)),
             )
             .arg(
+                Arg::new("startup_delay")
+                    .short('d')
+                    .long("startup-delay")
+                    .help("Time to wait for all processes to start up (in ns)")
+                    .value_parser(value_parser!(u64)),
+            )
+            .arg(
                 Arg::new("round_time")
                     .short('r')
                     .long("round")
@@ -67,7 +74,7 @@ impl ArgParser {
                 Arg::new("processes")
                     .short('p')
                     .long("processes")
-                    .help("Number of total repCXL processes")
+                    .help("Number of total repCXL processes. IDs will be generated from 0 to processes-1. Must be the same for all repCXL processes")
                     .value_parser(value_parser!(u32)),
             )
             .arg(
@@ -89,8 +96,19 @@ impl ArgParser {
         let mut matches = cmd.get_matches();
 
         // Parse individual CLI arguments
+        if let Some(ref path) = matches.remove_one::<String>("config") {
+            self.config = RepCXLConfig::from_file(path).unwrap_or_else(|e| {
+                error!("{}",e);
+                println!("{}", usage_string);
+                std::process::exit(1);
+            });
+        }
+        // arguments override config file values if both are provided
         if let Some(round_time_ns) = matches.remove_one::<u64>("round_time") {
             self.config.round_time = round_time_ns;
+        }
+        if let Some(startup_delay_ns) = matches.remove_one::<u64>("startup_delay") {
+            self.config.startup_delay = startup_delay_ns;
         }
         if let Some(id) = matches.remove_one::<u32>("id") {
             self.config.id = id as i32;
@@ -99,18 +117,10 @@ impl ArgParser {
             self.config.algorithm = algorithm;
         }
         if let Some(processes) = matches.remove_one::<u32>("processes") {
-            self.config.processes = processes;
-        }
-        if let Some(ref path) = matches.remove_one::<String>("config") {
-            info!("Config file provided, ignoring other CLI arguments");
-            // overwrite other args
-            self.config = RepCXLConfig::from_file(path).unwrap_or_else(|e| {
-                error!("{}",e);
-                println!("{}", usage_string);
-                std::process::exit(1);
-            });
+            self.config.processes = Vec::from_iter(0..processes);
         }
 
+        // validate config values
         match self.config.validate() {
             Ok(_) => matches,
             Err(e) => {

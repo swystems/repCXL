@@ -1,7 +1,10 @@
+use std::vec;
+
 use rep_cxl::RepCXL;
 
 mod test_utils;
 use test_utils::*;
+
 
 
 #[test]
@@ -9,13 +12,12 @@ fn test_repcxl_initialization() {
     let node_path = "/dev/shm/repCXL_test_init";
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
-    let mut rcxl = RepCXL::<u64>::new(
-        0,
-        TEST_MEMORY_SIZE,
-        TEST_CHUNK_SIZE,
-    );
+    let mut config = test_config(vec![node_path]);
+    config.id = 0;
+    config.processes = vec![0];
 
-    rcxl.add_memory_node_from_file(node_path);
+    let rcxl = RepCXL::<u64>::new(config);
+    // rcxl.add_memory_node_from_file(node_path);
     assert!(rcxl.is_coordinator());
     
     cleanup_tmpfs_file(node_path);
@@ -25,15 +27,11 @@ fn test_repcxl_initialization() {
 fn test_object_creation_and_allocation() {
     let node_path = "/dev/shm/repCXL_test_obj_create";
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
+    let mut config = test_config(vec![node_path]);
+    config.id = 0;
+    config.processes = vec![0];
 
-    let mut rcxl = RepCXL::<u64>::new(
-        0,
-        TEST_MEMORY_SIZE,
-        TEST_CHUNK_SIZE,
-    );
-
-    rcxl.add_memory_node_from_file(node_path);
-    rcxl.init_state();
+    let mut rcxl = RepCXL::<u64>::new(config);
 
     // Create multiple objects
     let obj1 = rcxl.new_object(1).expect("Failed to create object 1");
@@ -114,14 +112,7 @@ fn test_object_limit() {
     let node_path = "/dev/shm/repCXL_test_limit";
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
-    let mut rcxl = RepCXL::<u8>::new(
-        0,
-        TEST_MEMORY_SIZE,
-        TEST_CHUNK_SIZE,
-    );
-
-    rcxl.add_memory_node_from_file(node_path);
-    rcxl.init_state();
+    let mut rcxl = single_rcxl(0, vec![node_path]);
 
     let max_objs = rep_cxl::MAX_OBJECTS;
 

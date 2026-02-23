@@ -36,7 +36,7 @@ impl StartingBlock {
         }
     }
 
-    pub(crate) fn all_ready(&self, processes: Vec<usize>) -> bool {
-        processes.iter().all(|&pid| self.ready_processes[pid])
+    pub(crate) fn all_ready(&self, processes: Vec<u32>) -> bool {
+        processes.iter().all(|&pid| self.ready_processes[pid as usize])
     }
 }
