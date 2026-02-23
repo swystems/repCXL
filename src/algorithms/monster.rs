@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::*;
 use crate::Wid;
 use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
-use crate::logger;
+use crate::utils::logger;
 use crate::{ObjectMemoryEntry, ReadReturn};
 
 

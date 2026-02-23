@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use crate::safe_memio;
 use crate::GroupView;
 use crate::{WriteRequest,ReadRequest};
-use crate::logger::Logger;
+use crate::utils::logger::Logger;
 
 pub mod best_effort;
 pub mod monster;

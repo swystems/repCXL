@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use log::{error, warn};
 use crate::{ObjectMemoryEntry,ReadReturn};
-use crate::logger::Logger;
+use crate::utils::logger::Logger;
 use safe_memio::{mem_readone, MemoryError};
 
 use super::*;

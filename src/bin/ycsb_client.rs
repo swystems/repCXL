@@ -4,9 +4,10 @@
 use core::panic;
 use rep_cxl::utils::ycsb::load_ycsb_workload;
 use rep_cxl::utils::arg_parser::ArgParser;
-use rep_cxl::RepCXL;
+use rep_cxl::{RepCXL, ReadReturn};
 use clap::{Arg, value_parser};
 use log::{debug, info, error};
+use std::time::Duration;
 
 /// Convert Vec<u8> to fixed-size array, truncating or padding with zeros as needed
 fn vec_to_array<const N: usize>(vec: &Vec<u8>) -> [u8; N] {
@@ -107,6 +108,9 @@ fn main() {
     // start repcxl
     rcxl.sync_start();
 
+    // wait for all processes to start up before starting benchmark
+    std::thread::sleep(Duration::from_nanos(rcxl.config.startup_delay));
+
 
     // RUN PHASE: execute operations from run trace
     debug!("First 10 run operations:");
@@ -120,21 +124,47 @@ fn main() {
         debug!("  ... ({} more)", workload.run_ops.len() - 10);
     }
     
+
+    // metrics
+    let mut read_latencies = Vec::new();
+    let mut read_errors = 0;
+    let mut write_latencies = Vec::new();
+    let mut write_errors = 0;
+    let mut dirty_reads = 0;
+    let mut safe_reads = 0;
+
     info!("Executing YCSB run phase...");
+    let start_total = std::time::Instant::now();
     for op in &workload.run_ops {
         match op.op_type {
             rep_cxl::utils::ycsb::OpType::Read => {
                 let obj = index.get(&op.key).expect("Key not found in index");
-                if let Err(e) = obj.read() {
-                    error!("read error for object {}: {}", op.key, e);
+                let start = std::time::Instant::now();
+                match obj.read() {
+                    Ok(rr) => {
+                        match rr {
+                            ReadReturn::ReadDirty(_) => dirty_reads += 1,
+                            ReadReturn::ReadSafe(_) => safe_reads += 1,
+                        }
+                        read_latencies.push(start.elapsed());
+                    },
+                    Err(e) => {
+                        error!("read error for object {}: {}", op.key, e);
+                        read_errors += 1;
+                    },
                 }
             },
             rep_cxl::utils::ycsb::OpType::Update => {
                 let value: [u8; 64] = vec_to_array(&op.fields[0].1);
 
                 if let Some(obj) = index.get(&op.key) {
+                    let start = std::time::Instant::now();
                     if let Err(e) = obj.write(value) {
                         error!("write error for object {}: {}", op.key, e);
+                        write_errors += 1;
+                    }
+                    else {
+                        write_latencies.push(start.elapsed());
                     }
                 }
                 else {
@@ -144,8 +174,29 @@ fn main() {
             _ => panic!("Unexpected operation type in run phase: {:?}", op.op_type),
         }
     }    
-    
+    let total_elapsed = start_total.elapsed();
 
+    rcxl.stop();
+
+
+    // report metrics
+    let tput = workload.run_ops.len() as f64 / total_elapsed.as_secs_f64();
     
+    println!("YCSB run phase completed:");
+    println!("  Total operations: {}", workload.run_ops.len());
+    println!("  Total time: {}s", total_elapsed.as_secs_f64());
+    println!("  Throughput: {} ops/sec", tput);
+    println!("  Read errors: {}", read_errors);
+    println!("  Write errors: {}", write_errors);
+    println!("  Safe reads: {}", safe_reads);
+    println!("  Dirty reads: {}", dirty_reads);
+    if !read_latencies.is_empty() {
+        let avg_read_latency = read_latencies.iter().sum::<Duration>() / read_latencies.len() as u32;
+        println!("  Average read latency: {}μs", avg_read_latency.as_micros());
+    }
+    if !write_latencies.is_empty() {
+        let avg_write_latency = write_latencies.iter().sum::<Duration>() / write_latencies.len() as u32;
+        println!("  Average write latency: {}μs", avg_write_latency.as_micros());
+    }
 
 }

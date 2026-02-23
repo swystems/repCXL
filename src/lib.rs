@@ -9,7 +9,6 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 mod algorithms;
-pub mod logger;
 mod safe_memio;
 mod shmem;
 pub mod utils;
@@ -245,7 +244,7 @@ pub struct RepCXL<T> {
     rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
     stop_flag: Arc<AtomicBool>,
-    logger: Option<logger::Logger>,
+    logger: Option<utils::logger::Logger>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -294,8 +293,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
     /// Enable state logging to a file. Clears any existing log at the path.
     /// The algorithm thread will append state transitions to this file.
-    pub fn enable_log(&mut self, path: &str) {
-        let mut log = logger::Logger::new(path);
+    pub fn enable_file_log(&mut self, path: &str) {
+        let mut log = utils::logger::Logger::new(path);
         log.clear();
         self.logger = Some(log);
     }
@@ -479,7 +478,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
             loop {
                 if self.is_coordinator() {
-                    
+
                     // check if all processes are ready
                     if sblock.all_ready(self.view.processes.clone()) {
                         start_time = std::time::SystemTime::now() + Duration::from_nanos(self.config.startup_delay);

@@ -14,7 +14,7 @@ id = 0 # Unique identifier for the repCXL instance (required in practice)
 processes = [0, 1]
 
 startup_delay = 1000000000 # (ns) Time to wait for all processes to start up (in nanoseconds)
-round_time = 100000 # (ns) Duration of the synchronous round (in nanoseconds)
+round_time = 900 # (ns) Duration of the synchronous round (in nanoseconds)
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "monster"
 

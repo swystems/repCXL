@@ -3,7 +3,7 @@
 // at least 10ms round time or --test-threads=1 to reduce flakiness.
 use std::time::Duration;
 use rep_cxl::ReadReturn;
-use rep_cxl::logger;
+use rep_cxl::utils::logger;
 
 mod test_utils;
 use test_utils::*;
@@ -222,7 +222,7 @@ fn test_states_single_write() {
 
     let mut rcxl = single_rcxl(0, vec![node_path]);    
     rcxl.init_state();
-    rcxl.enable_log(log_path);
+    rcxl.enable_file_log(log_path);
     
 
     let obj = rcxl.new_object(1).expect("failed to create object");
@@ -265,12 +265,12 @@ fn test_states_write_conflict() {
     let mut rcxl0 = single_rcxl(0, vec![node_path]);    
     rcxl0.register_process(1);
     rcxl0.init_state();
-    rcxl0.enable_log(log_path0);
+    rcxl0.enable_file_log(log_path0);
 
     // init instance 2
     let mut rcxl1 = single_rcxl(1, vec![node_path]);    
     rcxl1.register_process(0);
-    rcxl1.enable_log(log_path1);
+    rcxl1.enable_file_log(log_path1);
 
     // create object
     let obj_coord = rcxl0.new_object(2).expect("failed to create object");
@@ -318,12 +318,12 @@ fn test_states_write_conflict_then_error() {
     let mut rcxl0 = single_rcxl(0, vec![node_paths[0]]);    
     rcxl0.register_process(1);
     rcxl0.init_state();
-    rcxl0.enable_log(log_path0);
+    rcxl0.enable_file_log(log_path0);
 
     // init instance B (replica) with both memory nodes
     let mut rcxl1 = single_rcxl(1, node_paths.clone());    
     rcxl1.register_process(0);
-    rcxl1.enable_log(log_path1);
+    rcxl1.enable_file_log(log_path1);
 
     // create object (replica finds it in the memory first node)
     let obj_coord = rcxl0.new_object(2).expect("failed to create object");

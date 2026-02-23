@@ -15,7 +15,7 @@ cd YCSB
 mvn -q -B -pl site.ycsb:redis-binding -am clean package 
 ```
 
-install redis 
+Example with redis 
     
     sudo apt install redis # by default runs as systemd service
 
