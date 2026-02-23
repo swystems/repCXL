@@ -4,7 +4,6 @@
 // the same set of parameters can be supplied via file instead of flags.
 
 use std::fs;
-use log::error;
 use serde::Deserialize;
 
 const DEFAULT_MEM_SIZE: usize = 1024 * 1024; // 1 MiB
@@ -46,41 +45,35 @@ impl Default for RepCXLConfig {
 
 impl RepCXLConfig {
     /// Read and parse a TOML config file from the given path.
-    pub fn from_file(path: &str) -> Self {
+    pub fn from_file(path: &str) -> Result<Self, String> {
         let content = fs::read_to_string(path)
-            .unwrap_or_else(|e| {
-                error!("Failed to read config file '{}': {}", path, e);
-                std::process::exit(1);
-            });
+            .map_err(|e| format!("Failed to read config file '{}': {}", path, e))?;
 
         // deserialize the file into RepCXLConfig struct. Missing field will
         // take the default value
         toml::from_str(&content)
-            .unwrap_or_else(|e| {
-                error!("Failed to parse config file '{}': {}", path, e);
-                std::process::exit(1);
-            })
+            .map_err(|e| format!("Failed to parse config file '{}': {}", path, e))
     }
 
     /// Validate the config values. Exits if any value is invalid.
-    pub fn validate(&self) {
+    pub fn validate(&self) -> Result<(), String> {
+
+        let err_prefix = "Invalid config:".to_string();
         // must specify id
         if self.id < 0 {
-            error!("id must be provided in the config");
-            std::process::exit(1);
+            return Err(format!("{} id must be provided in the config", err_prefix));
         }
-
+        // id must be less than the number of processes
         if self.id as u32 >= self.processes {
-            error!("id must be less than the number of processes");
-            error!("id: {}, # of processes: {}", self.id, self.processes);
-            std::process::exit(1);
+            return Err(format!("{} id must be less than the number of processes", err_prefix));
         }
 
         // must specify at least one node
         if self.mem_nodes.is_empty() {
-            error!("at least one memory node must be specified in the config");
-            std::process::exit(1);
+            return Err(format!("{} at least one memory node must be specified in the config", err_prefix));
         }
+
+        Ok(())
     }
 
 }

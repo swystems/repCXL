@@ -1,7 +1,7 @@
 // Parse command line arguments for RepCXL binaries and benchmarks
-
 use clap::{Arg, value_parser};
 use super::config::RepCXLConfig;
+use log::{info, error};
 
 #[derive(Debug)]
 pub struct ArgParser {
@@ -32,8 +32,12 @@ impl ArgParser {
         }
     }
     
-    /// Parse CLI arguments and populate the config struct. Returns the remaining
-    /// arguments that are not part of RepCXLConfig (e.g. benchmark-specific args).
+    /// Parse CLI arguments and populate the config struct. A number of arguments
+    /// relative to repCXL e.g. "-c conig-file.toml' are parsed by default. 
+    /// 
+    /// Other benchmark-specific can be added with `add_arg` and `add_args`
+    /// before calling this function. These are retuned as a clap::ArgMatches 
+    /// struct for the caller to parse and use as needed
     pub fn parse(&mut self) -> clap::ArgMatches {
         let mut cmd = clap::Command::new(&self.program_name)
             .version("1.0")
@@ -78,6 +82,10 @@ impl ArgParser {
             cmd = cmd.arg(extra_arg.clone());
         }
 
+        let usage_string = cmd.render_usage().to_string();
+        let help_string = cmd.render_help().to_string();
+
+
         let mut matches = cmd.get_matches();
 
         // Parse individual CLI arguments
@@ -94,14 +102,23 @@ impl ArgParser {
             self.config.processes = processes;
         }
         if let Some(ref path) = matches.remove_one::<String>("config") {
-            println!("Config file provided, ignoring other CLI arguments");
+            info!("Config file provided, ignoring other CLI arguments");
             // overwrite other args
-            self.config = RepCXLConfig::from_file(path);
+            self.config = RepCXLConfig::from_file(path).unwrap_or_else(|e| {
+                error!("{}",e);
+                println!("{}", usage_string);
+                std::process::exit(1);
+            });
         }
 
-        self.config.validate(); // exits if config is invalid
+        match self.config.validate() {
+            Ok(_) => matches,
+            Err(e) => {
+                error!("{}\nHelp:\n{}" , e, help_string);
+                std::process::exit(1);
+            },
+        }
 
-        matches
     }
 
 }
