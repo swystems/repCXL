@@ -1,13 +1,24 @@
 // Run YCSB benchmark through the RepCXL client library. It imports
 // a YCSB workload and executes it (rather than issuing reqs from YCSB Java bin).
 
+use core::panic;
 use rep_cxl::utils::ycsb::load_ycsb_workload;
 use rep_cxl::utils::arg_parser::ArgParser;
+use rep_cxl::RepCXL;
 use clap::{Arg, value_parser};
-use log::info;
+use log::{debug, info, error};
+
+/// Convert Vec<u8> to fixed-size array, truncating or padding with zeros as needed
+fn vec_to_array<const N: usize>(vec: &Vec<u8>) -> [u8; N] {
+    let mut arr = [0u8; N];
+    let copy_len = vec.len().min(N);
+    arr[..copy_len].copy_from_slice(&vec[..copy_len]);
+    arr
+}
+
 fn main() {
 
-    simple_logger::init().unwrap();
+    simple_logger::init_with_env().unwrap();
 
     let mut ap = ArgParser::new( "ycsb_client", "YCSB Client for RepCXL" ); 
     
@@ -35,24 +46,105 @@ fn main() {
     let workload = load_ycsb_workload(load_trace, run_trace);
     workload.summary();
 
-    info!("\nFirst 5 load operations:");
+    debug!("First 5 load operations:");
     for (i, op) in workload.load_ops.iter().enumerate().take(5) {
         let val_preview: String = op.fields.first()
             .map(|(name, val)| format!(" {}=[{}B]", name, val.len()))
             .unwrap_or_default();
-        info!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
+        debug!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
     }
 
-    info!("\nFirst 10 run operations:");
+    // Initialize RepCXL client and local index
+    let mut rcxl = RepCXL::<[u8; 64]>::new(ap.config);
+    let mut index = std::collections::HashMap::new();
+
+    // LOAD PHASE: populate index and memory nodes
+    if rcxl.is_coordinator() {
+        info!("This process is the coordinator. Executing YCSB load phase...");
+        rcxl.init_state(); // only coordinator initializes the state
+
+        let mut oid = 0;
+        for op in workload.load_ops {
+            match op.op_type {
+                rep_cxl::utils::ycsb::OpType::Insert => {
+                    
+                    // truncate/pad to fixed-size
+                    let value: [u8; 64] = vec_to_array(&op.fields[0].1);
+
+                    if let Some(obj) = rcxl.new_object_with_val(oid, value) {
+                        index.insert(op.key, obj);
+                        oid += 1;
+                    }
+                    else {
+                        panic!("Failed to create object for key {}", op.key);
+                    }
+                },
+                _ => panic!("Unexpected operation type in load phase: {:?}", op.op_type),
+            }
+        }
+    } else {
+        info!("This process is a replica. Waiting for coordinator to execute YCSB workload...");
+        
+        // get objects created by coordinator and populate index
+        let mut oid = 0;
+        for op in workload.load_ops {
+            match op.op_type {
+                rep_cxl::utils::ycsb::OpType::Insert => {
+                    if let Some(obj) = rcxl.get_object(oid) {
+                        index.insert(op.key, obj);
+                        oid += 1;
+                    }
+                    else {
+                        // wait for the coordinator to create the object
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                },
+                _ => panic!("Unexpected operation type in load phase: {:?}", op.op_type),
+            }
+        }
+    }
+    
+    // start repcxl
+    rcxl.sync_start();
+
+
+    // RUN PHASE: execute operations from run trace
+    debug!("First 10 run operations:");
     for (i, op) in workload.run_ops.iter().enumerate().take(10) {
         let val_preview: String = op.fields.first()
             .map(|(name, val)| format!(" {}=[{}B]", name, val.len()))
             .unwrap_or_default();
-        info!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
+        debug!("  [{}] {:?} {}{}", i, op.op_type, op.key, val_preview);
     }
     if workload.run_ops.len() > 10 {
-        info!("  ... ({} more)", workload.run_ops.len() - 10);
+        debug!("  ... ({} more)", workload.run_ops.len() - 10);
     }
+    
+    info!("Executing YCSB run phase...");
+    for op in &workload.run_ops {
+        match op.op_type {
+            rep_cxl::utils::ycsb::OpType::Read => {
+                let obj = index.get(&op.key).expect("Key not found in index");
+                if let Err(e) = obj.read() {
+                    error!("read error for object {}: {}", op.key, e);
+                }
+            },
+            rep_cxl::utils::ycsb::OpType::Update => {
+                let value: [u8; 64] = vec_to_array(&op.fields[0].1);
+
+                if let Some(obj) = index.get(&op.key) {
+                    if let Err(e) = obj.write(value) {
+                        error!("write error for object {}: {}", op.key, e);
+                    }
+                }
+                else {
+                    panic!("Key not found in index for update: {}", op.key);
+                }
+            },
+            _ => panic!("Unexpected operation type in run phase: {:?}", op.op_type),
+        }
+    }    
+    
 
     
 

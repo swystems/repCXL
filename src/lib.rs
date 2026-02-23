@@ -20,7 +20,7 @@ pub use config::RepCXLConfig;
 
 // Limits
 const MAX_PROCESSES: usize = 128; // Maximum number of processes
-pub const MAX_OBJECTS: usize = 128; // Maximum number of objects
+pub const MAX_OBJECTS: usize = 1000; // Maximum number of objects
 
 
 /// The current membership of the group. Stores both the
@@ -269,10 +269,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
 
         // init shared state
-        let state = SharedState::new(config.mem_size, config.chunk_size);
-        for node in &view.memory_nodes {
-            node.write_state(state);
-        }
+        // let state = SharedState::new(config.mem_size, config.chunk_size);
+        // for node in &view.memory_nodes {
+        //     node.write_state(state);
+        // }
 
         // init read and write request queues
         let (wtx, wrx) = mpsc::channel();
@@ -315,6 +315,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     }
 
     pub fn init_state(&mut self) {
+        if !self.is_coordinator() {
+            warn!("Only the coordinator should initialize state");
+            return;
+        }
+
         let state = SharedState::new(self.config.mem_size, self.config.chunk_size);
 
         // Write the shared state to each memory node
@@ -396,6 +401,26 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
     }
 
+    /// Creates a new object and initalizes it with a given value
+    pub fn new_object_with_val(&mut self, id: usize, value: T) -> Option<RepCXLObject<T>> {
+        if let Some(obj) = self.new_object(id) {
+            
+            // no write request ID for initialization
+            let entry = ObjectMemoryEntry::new_nowid(value);
+
+            // write to all memory nodes
+            match safe_memio::mem_writeall(obj.info.offset, entry, &self.view.memory_nodes) {
+                Ok(_) => Some(obj),
+                Err(safe_memio::MemoryError(memory_node_id)) => {
+                    error!("Failed to write object {} to memory node {}", id, memory_node_id);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn remove_object(&mut self, id: usize) {
         if !self.is_coordinator() {
             error!("Only the coordinator can remove objects");
@@ -422,7 +447,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let state = self.read_state_from_any().unwrap();
 
         if let Some(oi) = state.object_index.lookup_object(id) {
-            info!("Object found in shared state");
             let obj = RepCXLObject::new(
                 id,
                 oi.offset,
@@ -432,6 +456,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             );
             return Some(obj);
         }
+        info!("Object {} not found in shared state", id);
+
         None
     }
 
@@ -439,19 +465,21 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// **assumes sync'ed clocks**
     /// All processes must call this function with the same group view to
     /// ensure consistency.
-    pub fn sync_start(&mut self, algorithm: String, rt: Duration) {
+    pub fn sync_start(&mut self) {
         if let Some(_coord) = self.view.get_coordinator() {
+            let algorithm = self.config.algorithm.clone();
+            let rt = Duration::from_nanos(self.config.round_time);
+
             let mstate = self.get_state_from_master().unwrap();
             let sblock = mstate.get_starting_block();
             let start_time;
             // mark self as ready
             sblock.mark_ready(self.config.id as usize);
-            info!("Process {} marked as ready.", self.config.id);
+            info!("Process {} ready and waiting to start", self.config.id);
 
             loop {
                 if self.is_coordinator() {
-                    // info!("Process {} is the coordinator", self.id);
-
+                    
                     // check if all processes are ready
                     if sblock.all_ready(self.view.processes.clone()) {
                         start_time = std::time::SystemTime::now() + Duration::from_nanos(self.config.startup_delay);

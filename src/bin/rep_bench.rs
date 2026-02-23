@@ -95,8 +95,7 @@ fn main() {
         }
     }
 
-    rcxl.sync_start(rcxl.config.algorithm.clone(), 
-        std::time::Duration::from_nanos(rcxl.config.round_time));
+    rcxl.sync_start();
 
     // wait for all processes to start up before starting benchmark
     std::thread::sleep(Duration::from_nanos(rcxl.config.startup_delay));
@@ -109,7 +108,7 @@ fn main() {
     let (lats_tx, lats_rx) = std::sync::mpsc::channel();
     let (tput_tx, tput_rx) = std::sync::mpsc::channel();
 
-    for c in 0..clients {   
+    for c in 0..clients {
         let lats_tx = lats_tx.clone();
         let tput_tx = tput_tx.clone();
 

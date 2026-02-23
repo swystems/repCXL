@@ -65,7 +65,7 @@ pub struct YcsbWorkload {
 
 impl YcsbWorkload {
     pub fn summary(&self) {
-        println!("YCSB workload: {} load ops, {} run ops", self.load_ops.len(), self.run_ops.len());
+        println!("\nYCSB workload\n  {} load ops, {} run ops", self.load_ops.len(), self.run_ops.len());
         println!("  record_count={}, field_count={}, field_length={}",
             self.properties.record_count, self.properties.field_count, self.properties.field_length);
         println!("  read={}, update={}, insert={}, scan={}",
@@ -77,7 +77,7 @@ impl YcsbWorkload {
             .chain(self.run_ops.iter())
             .map(|op| op.key.as_str())
             .collect();
-        println!("  unique keys: {}", unique_keys.len());
+        println!("  unique keys: {}\n", unique_keys.len());
     }
 }
 

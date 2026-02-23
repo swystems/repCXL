@@ -35,7 +35,7 @@ impl std::fmt::Display for MonsterState {
 // logging macro with phase tag
 macro_rules! monster_info {
     ($tag:expr, $($arg:tt)*) => {
-        log::info!("[{} phase] {}", $tag, format_args!($($arg)*));
+        log::debug!("[{} phase] {}", $tag, format_args!($($arg)*));
     };
 }
 

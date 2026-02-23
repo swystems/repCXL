@@ -32,7 +32,7 @@ fn test_object_creation_and_allocation() {
     config.processes = vec![0];
 
     let mut rcxl = RepCXL::<u64>::new(config);
-
+    rcxl.init_state();
     // Create multiple objects
     let obj1 = rcxl.new_object(1).expect("Failed to create object 1");
     let obj2 = rcxl.new_object(2).expect("Failed to create object 2");
@@ -113,6 +113,7 @@ fn test_object_limit() {
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
     let mut rcxl = single_rcxl(0, vec![node_path]);
+    rcxl.init_state();
 
     let max_objs = rep_cxl::MAX_OBJECTS;
 

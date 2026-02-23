@@ -8,11 +8,9 @@ use rep_cxl::logger;
 mod test_utils;
 use test_utils::*;
 
-const ALGORITHM: &str = "monster";
-const ROUND_TIME: Duration = Duration::from_millis(10);
 
 fn wait_for_rounds(rounds: u32) {
-    std::thread::sleep(ROUND_TIME * rounds);
+    std::thread::sleep(Duration::from_nanos(TEST_ROUND_TIME) * rounds);
 }
 
 fn start_two_nodes_and_create_object(node_paths: Vec<&str>) -> (rep_cxl::RepCXLObject<u64>, rep_cxl::RepCXLObject<u64>) {
@@ -32,10 +30,10 @@ fn start_two_nodes_and_create_object(node_paths: Vec<&str>) -> (rep_cxl::RepCXLO
     
     // both start
     std::thread::spawn(move || {
-        repcxl0.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        repcxl0.sync_start();
     });
     std::thread::spawn(move || {
-        repcxl1.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        repcxl1.sync_start();
     });
 
     (obj5_coordinator, obj5_replica)
@@ -167,6 +165,7 @@ fn test_readdirty() {
     // RepCXL instance 1: uses nodes 1 and 2
     let mut repcxl_a = single_rcxl(0, vec![node_paths[0], node_paths[1]]);
     repcxl_a.register_process(1);
+    repcxl_a.init_state();
     
     // RepCXL instance 2: uses nodes 0 and 2
     let mut repcxl_b = single_rcxl(1, vec![node_paths[0], node_paths[2]]);
@@ -182,10 +181,10 @@ fn test_readdirty() {
 
     // Start both instances
     std::thread::spawn(move || {
-        repcxl_a.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        repcxl_a.sync_start();
     });
     // std::thread::spawn(move || {
-        repcxl_b.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        repcxl_b.sync_start();
     // });
 
     // Write from instance A (replicates to nodes 1 and 2)
@@ -222,11 +221,13 @@ fn test_states_single_write() {
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
     let mut rcxl = single_rcxl(0, vec![node_path]);    
+    rcxl.init_state();
     rcxl.enable_log(log_path);
+    
 
     let obj = rcxl.new_object(1).expect("failed to create object");
 
-    rcxl.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+    rcxl.sync_start();
 
     // Perform a single write and stop more than one round latency after to allow
     // the state machine to go back to the initial state (Try)
@@ -263,6 +264,7 @@ fn test_states_write_conflict() {
     // init instance 1
     let mut rcxl0 = single_rcxl(0, vec![node_path]);    
     rcxl0.register_process(1);
+    rcxl0.init_state();
     rcxl0.enable_log(log_path0);
 
     // init instance 2
@@ -277,11 +279,11 @@ fn test_states_write_conflict() {
 
     // conflicting writes from both instances 
     std::thread::spawn(move || {
-        rcxl0.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        rcxl0.sync_start();
         let _ = obj_coord.write(88);
     });
 
-    rcxl1.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+    rcxl1.sync_start();
     let _ = obj_replica.write(99);
 
     // let coord_states = logger::Logger::new(log_path0).read_monster_states();
@@ -315,6 +317,7 @@ fn test_states_write_conflict_then_error() {
     // init instance A (coordinator) with only the first memory node
     let mut rcxl0 = single_rcxl(0, vec![node_paths[0]]);    
     rcxl0.register_process(1);
+    rcxl0.init_state();
     rcxl0.enable_log(log_path0);
 
     // init instance B (replica) with both memory nodes
@@ -328,10 +331,10 @@ fn test_states_write_conflict_then_error() {
 
     // conflicting writes from both instances 
     std::thread::spawn(move || {
-        rcxl0.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        rcxl0.sync_start();
         let _ = obj_coord.write(88);
     });
-    rcxl1.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+    rcxl1.sync_start();
     let _ = obj_replica.write(99);
 
     // let coord_states = logger::Logger::new(log_path0).read_monster_states();

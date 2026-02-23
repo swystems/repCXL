@@ -4,6 +4,8 @@ use rep_cxl::RepCXLConfig;
 
 pub const TEST_MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
 pub const TEST_CHUNK_SIZE: usize = 64;
+pub const TEST_ALGORITHM: &str = "monster";
+pub const TEST_ROUND_TIME: u64 = 10_000_000; // 10 ms
 
 pub fn test_config(node_paths: Vec<&str>) -> RepCXLConfig {
     RepCXLConfig {
@@ -11,7 +13,9 @@ pub fn test_config(node_paths: Vec<&str>) -> RepCXLConfig {
         mem_nodes: node_paths.into_iter().map(|s| s.to_string()).collect(),
         mem_size: TEST_MEMORY_SIZE,
         chunk_size: TEST_CHUNK_SIZE,
-        processes: vec![],
+        processes: vec![], 
+        algorithm: TEST_ALGORITHM.to_string(),
+        round_time: TEST_ROUND_TIME,
         ..Default::default()
     }
 }
@@ -36,8 +40,13 @@ pub fn single_rcxl(id: usize, node_paths: Vec<&str>) -> RepCXL<u64> {
 pub fn multi_rcxl(num: usize, node_paths: Vec<&str>) -> Vec<RepCXL<u64>> {
     let mut processes = Vec::new();
     for i in 0..num {
-        let rcxl = single_rcxl(i, node_paths.clone());
+        let mut rcxl = single_rcxl(i, node_paths.clone());
+        if i == 0 {
+            rcxl.init_state(); // coordinator inits state
+        }
         processes.push(rcxl);
+
+        
     }
     processes
 }
