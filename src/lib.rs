@@ -454,7 +454,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
                     // check if all processes are ready
                     if sblock.all_ready(self.view.processes.clone()) {
-                        start_time = std::time::SystemTime::now() + Duration::from_secs(1);
+                        start_time = std::time::SystemTime::now() + Duration::from_nanos(self.config.startup_delay);
                         sblock.start_at(start_time);
                         info!("Rounds starting at {:?}", start_time);
 
