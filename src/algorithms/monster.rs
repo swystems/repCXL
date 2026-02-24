@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::*;
 use crate::Wid;
 use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
-use crate::logger;
+use crate::utils::ms_logger;
 use crate::{ObjectMemoryEntry, ReadReturn};
 
 
@@ -31,11 +31,36 @@ impl std::fmt::Display for MonsterState {
     } 
 }
 
+struct MonsterStats {
+    conflicts: u64,
+    sync_failures: u64,
+    empty_requests: u64,
+    prev_round: u64,
+}
+
+impl MonsterStats {
+    fn new() -> Self {
+        Self {
+            conflicts: 0,
+            sync_failures: 0,
+            empty_requests: 0,
+            prev_round: 1,
+        }
+    }
+
+    fn check_sync_failure(&mut self, round_num: u64) {
+        if round_num > self.prev_round + 1 {
+            self.sync_failures += 1;
+        }
+        self.prev_round = round_num;
+    }
+}
+
 // 
 // logging macro with phase tag
 macro_rules! monster_info {
     ($tag:expr, $($arg:tt)*) => {
-        log::info!("[{} phase] {}", $tag, format_args!($($arg)*));
+        log::debug!("[{} phase] {}", $tag, format_args!($($arg)*));
     };
 }
 
@@ -51,7 +76,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     round_time: Duration,
     req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
-    mut logger_opt: Option<logger::Logger>,
+    mut logger_opt: Option<ms_logger::MonsterStateLogger>,
 ) {
     let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
     let mut monster_state = MonsterState::Try;
@@ -60,6 +85,8 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     let mut pending_req = None; // pending write request
     let mut wid = Wid::new(0,0); // write request id
     let mut oid = 0; // object id
+    let mut stats = MonsterStats::new();
+
 
     // get shared write conflict checker
     let mnode_state = view.get_master_node().unwrap().get_state();
@@ -71,6 +98,8 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
+            monster_info!(monster_state, "Stop flag is set, exiting");
+            log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}", stats.conflicts, stats.sync_failures, stats.empty_requests);
             break;
         }
 
@@ -79,6 +108,8 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             SystemTime::now().duration_since(round_start).unwrap(),
             oid
         );
+
+        stats.check_sync_failure(round_num);
 
         // Log state transition if logging is enabled
         if let Some(ref mut logger) = logger_opt {
@@ -101,6 +132,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                     Err(e) => match e {
                         mpsc::TryRecvError::Empty => {
                             // no request, stay in Try state
+                            stats.empty_requests += 1;
                         },
                         mpsc::TryRecvError::Disconnected => {
                             // the repcxl instance keeps the original sender, 
@@ -174,6 +206,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             // wait for the replicate phase of the conflicting process to finish
             MonsterState::Wait => {
                 monster_state = MonsterState::PostConflictCheck;
+                stats.conflicts += 1;
             },
 
             // check if the conflicting write has been fully replicated, otherwise

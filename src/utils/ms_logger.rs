@@ -14,14 +14,14 @@ pub struct MonsterStateLogEntry {
     pub object_id: usize,
 }
 
-pub struct Logger {
+pub struct MonsterStateLogger {
     log: File,
     // path: String,
 }
 
-impl Logger {
+impl MonsterStateLogger {
     pub fn new(path: &str) -> Self {
-        Logger {
+        MonsterStateLogger {
             log: OpenOptions::new()
             .create(true)
             .append(true)
@@ -82,7 +82,7 @@ impl Logger {
 
 
 /// Assert that the log file contains exactly the expected sequence of states.
-pub fn assert_states(logger: &mut Logger, expected: &[&str]) {
+pub fn assert_states(logger: &mut MonsterStateLogger, expected: &[&str]) {
     let actual = logger.read_monster_states();
     assert_eq!(
         actual.len(),

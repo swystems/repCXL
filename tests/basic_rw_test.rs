@@ -22,6 +22,12 @@ fn test_rw() {
     // register processes
     repcxl0.register_process(1);
     repcxl1.register_process(0);
+
+    repcxl0.config.algorithm = ALGORITHM.to_string();
+    repcxl0.config.round_time = ROUND_TIME.as_nanos() as u64;
+    
+    repcxl1.config.algorithm = ALGORITHM.to_string();
+    repcxl1.config.round_time = ROUND_TIME.as_nanos() as u64;
     
     // coordinator creates object
     repcxl0.new_object(5);
@@ -30,10 +36,10 @@ fn test_rw() {
     
     // both start
     std::thread::spawn(move || {
-        repcxl0.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        repcxl0.sync_start();
     });
     std::thread::spawn(move || {
-        repcxl1.sync_start(ALGORITHM.to_string(), ROUND_TIME);
+        repcxl1.sync_start();
     });
     
     
@@ -51,7 +57,7 @@ fn test_rw() {
 
     cleanup_tmpfs_file(node_path);
 
-    std::thread::sleep(Duration::from_secs(10));
+    // std::thread::sleep(Duration::from_secs(10));
  
     // write and read threads stop after the test ends and the repCXL instances 
     // are dropped. Cannot explicitly stop them here because threads own 

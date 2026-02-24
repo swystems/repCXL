@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use crate::safe_memio;
 use crate::GroupView;
 use crate::{WriteRequest,ReadRequest};
-use crate::logger::Logger;
+use crate::utils::ms_logger::MonsterStateLogger;
 
 pub mod best_effort;
 pub mod monster;
@@ -24,7 +24,7 @@ pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     Duration,
     mpsc::Receiver<WriteRequest<T>>,
     Arc<AtomicBool>,
-    Option<Logger>,
+    Option<MonsterStateLogger>,
 ) {
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_write,

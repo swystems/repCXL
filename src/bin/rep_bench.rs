@@ -2,28 +2,18 @@
 use clap::{value_parser, Arg};
 use log::{debug, error};
 use rand::Rng;
-use rep_cxl::RepCXL;
+use rep_cxl::{RepCXL, utils};
 use simple_logger;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use rep_cxl::utils::arg_parser::ArgParser;
 
-// CONFIG
-const NODE_PATHS: [&str; 3] = [
-    "/dev/shm/repCXL_test1",
-    "/dev/shm/repCXL_test2",
-    "/dev/shm/repCXL_test3",
-];
-const MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
-const CHUNK_SIZE: usize = 64; // 64 bytes
 const OBJ_VAL: u64 = 124; // use this value for all objects. Change size or type
 
-// DEFAULTS
-const DEFAULT_ATTEMPTS: &str = "100";
+// BENCHMARK DEFAULTS
+const DEFAULT_ATTEMPTS: &str = "100000";
 const DEFAULT_CLIENTS: &str = "1";
 const DEFAULT_OBJECTS: &str = "100";
-const DEFAULT_PROCESSES: &str = "1";
-const DEFAULT_ROUND_TIME_NS: &str = "1000000"; //1ms
-const DEFAULT_ALGORITHM: &str = "monster";
 
 pub fn percentile(latencies: &Vec<u128>, p: f32) -> u128 {
     if latencies.is_empty() {
@@ -39,104 +29,48 @@ fn main() {
     // Initialize the logger
     simple_logger::init().unwrap();
 
-    let matches = clap::Command::new("rep_bench")
-        .version("1.0")
-        .about("Consistent Latency replication over CXL")
-        .arg(
-            Arg::new("round_time")
-                .short('r')
-                .long("round")
-                .help("Duration of the synchronous round of the replication protocol (in ns)")
-                .default_value(DEFAULT_ROUND_TIME_NS) // 1 ms
-                .value_parser(value_parser!(u64)),
-        )
-        .arg(
-            Arg::new("attempts")
-                .short('a')
-                .long("attempts")
-                .help("Number of tests")
-                .default_value(DEFAULT_ATTEMPTS)
-                .value_parser(value_parser!(u32)),
-        )
-        .arg(
-            Arg::new("id")
-                .short('i')
-                .long("id")
-                .help("Unique identifier for the repCXL instance")
-                .required(true)
-                .value_parser(value_parser!(u32)),
-        )
-        .arg(
-            Arg::new("processes")
-                .short('p')
-                .long("processes")
-                .help("Number of total repCXL processes")
-                .default_value(DEFAULT_PROCESSES)
-                .value_parser(value_parser!(u32)),
-        )
-        .arg(
-            Arg::new("clients")
-                .short('c')
-                .long("clients")
-                .help("Number of clients issuing requests to the current repCXL process. Must be the same for all repCXL processes")
-                .default_value(DEFAULT_CLIENTS)
-                .value_parser(value_parser!(u32)),
-        )
-        .arg(
-            Arg::new("objects")
-                .short('o')
-                .long("objects")
-                .help("Number of objects to create")
-                .default_value(DEFAULT_OBJECTS)
-                .value_parser(value_parser!(usize)),
-        )
-        .arg(
-            Arg::new("algorithm")
-                .short('A')
-                .long("algorithm")
-                .help("Replication algorithm to use")
-                .default_value(DEFAULT_ALGORITHM)
-                .value_parser(value_parser!(String)),
-        )
-        .get_matches();
+    // Parse repcxl and benchmark-specific args
+    let mut ap = ArgParser::new("rep_bench", "test replication performance of repCXL");
+    ap.add_args(&[
+        Arg::new("attempts")
+            .short('a')
+            .long("attempts")
+            .help("Number of tests")
+            .default_value(DEFAULT_ATTEMPTS)
+            .value_parser(value_parser!(u32)),
+        Arg::new("clients")
+            .short('C')
+            .long("clients")
+            .help("Number of clients issuing requests to the current repCXL process. Must be the same for all repCXL processes")
+            .default_value(DEFAULT_CLIENTS)
+            .value_parser(value_parser!(u32)),
+        Arg::new("objects")
+            .short('o')
+            .long("objects")
+            .help("Number of objects to create")
+            .default_value(DEFAULT_OBJECTS)
+            .value_parser(value_parser!(usize)),
+    ]);
 
-    // Parse the command line arguments
-    let round_time_ns = matches.get_one::<u64>("round_time").unwrap().clone();
-    let round_time = Duration::from_nanos(round_time_ns);
-
-    let id = matches.get_one::<u32>("id").unwrap().clone();
-    let processes = matches.get_one::<u32>("processes").unwrap().clone();
-    if id >= processes {
-        error!("id must be less than the number of processes");
-        error!("id: {id}, # of processes: {processes}");
-        std::process::exit(1);
-    }
-
+    let matches = ap.parse();
+    
     let attempts = matches.get_one::<u32>("attempts").unwrap().clone();
     let clients = matches.get_one::<u32>("clients").unwrap().clone();
     let num_of_objects = matches.get_one::<usize>("objects").unwrap().clone();
 
-    let algorithm = matches.get_one::<String>("algorithm").unwrap().clone();
+    let config = ap.config;
 
     // start repCXL process
-    debug!("Starting RepCXL instance with id {}", id);
+    debug!("Starting RepCXL instance with id {}", config.id);
      let mut rcxl =
-        RepCXL::<u64>::new(id as usize, MEMORY_SIZE, CHUNK_SIZE);
+        RepCXL::<u64>::new(config);
 
-    // open memory nodes
-    for path in NODE_PATHS.iter() {
-        rcxl.add_memory_node_from_file(path);
-    }
 
-    // add processes to initial group view
-    for process in 0..processes {
-        rcxl.register_process(process as usize);
-    }
 
     let mut objects = Vec::new();
     // only the coordinator manages the state
     if rcxl.is_coordinator() {
-        debug!("Starting as coordinator with id {}", rcxl.id);
+        debug!("Starting as coordinator with id {}", rcxl.config.id);
         rcxl.init_state();
 
         for i in 0..num_of_objects {
@@ -147,7 +81,7 @@ fn main() {
     }
     // Replica
     else {
-        debug!("Starting as replica with id {}", rcxl.id);
+        debug!("Starting as replica with id {}", rcxl.config.id);
 
         for i in 0..num_of_objects {
             // try until the coordinator creates the object
@@ -161,9 +95,10 @@ fn main() {
         }
     }
 
+    rcxl.sync_start();
 
-    rcxl.sync_start(algorithm, round_time);
-
+    // wait for all processes to start up before starting benchmark
+    std::thread::sleep(Duration::from_nanos(rcxl.config.startup_delay));
     
     // start benchmark
     let objects = Arc::new(objects);
@@ -173,7 +108,7 @@ fn main() {
     let (lats_tx, lats_rx) = std::sync::mpsc::channel();
     let (tput_tx, tput_rx) = std::sync::mpsc::channel();
 
-    for c in 0..clients {   
+    for c in 0..clients {
         let lats_tx = lats_tx.clone();
         let tput_tx = tput_tx.clone();
 
@@ -216,8 +151,8 @@ fn main() {
 
     loop {
         match (lats_rx.recv(), tput_rx.recv()) {
-            (Ok(l), Ok(t)) => {
-                lats_ns.append(&mut l.into_iter().map(|d| d.as_nanos()).collect());
+            (Ok(mut lvec), Ok(t)) => {
+                lats_ns.append(&mut lvec);
                 total_tputs.push(t);
             }
             _ => break,
@@ -235,28 +170,5 @@ fn main() {
         total_tputs.iter().sum::<f64>() / total_tputs.len() as f64
     );
     // let lats_ns: Vec<u128> = lats.into_iter().map(|d| d.as_nanos()).collect();
-    let mem_avg = lats_ns.iter().sum::<u128>() as f64 / attempts as f64;
-    let mem_max = lats_ns.iter().max().unwrap();
-    let mem_min = lats_ns.iter().min().unwrap();
-
-    println!("Round time {:?}, {attempts} runs", round_time);
-    println!("Latency Avg: {:?}", Duration::from_nanos(mem_avg as u64));
-    println!("Latency Min: {:?}", Duration::from_nanos(*mem_min as u64));
-    println!(
-        "Latency 50th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.5) as u64)
-    );
-    println!(
-        "Latency 95th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.95) as u64)
-    );
-    println!(
-        "Latency 99th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.99) as u64)
-    );
-    println!(
-        "Latency 99.99th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.9999) as u64)
-    );
-    println!("Latency Max: {:?}", Duration::from_nanos(*mem_max as u64));
+    utils::print_latency_stats(&lats_ns);
 }
