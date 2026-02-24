@@ -5,6 +5,7 @@ use core::panic;
 use rep_cxl::utils::ycsb::load_ycsb_workload;
 use rep_cxl::utils::arg_parser::ArgParser;
 use rep_cxl::{RepCXL, ReadReturn};
+use rep_cxl::utils;
 use clap::{Arg, value_parser};
 use log::{debug, info, error};
 use std::time::Duration;
@@ -19,7 +20,11 @@ fn vec_to_array<const N: usize>(vec: &Vec<u8>) -> [u8; N] {
 
 fn main() {
 
-    simple_logger::init_with_env().unwrap();
+    simple_logger::SimpleLogger::new()
+        .env()
+        .without_timestamps()
+        .init()
+        .unwrap();
 
     let mut ap = ArgParser::new( "ycsb_client", "YCSB Client for RepCXL" ); 
     
@@ -41,8 +46,6 @@ fn main() {
     
     let load_trace = extra_args.get_one::<String>("load_trace").unwrap();
     let run_trace = extra_args.get_one::<String>("run_trace").unwrap();
-
-    // println!("\nParsed arguments: {:#?}", ap);
 
     let workload = load_ycsb_workload(load_trace, run_trace);
     workload.summary();
@@ -140,7 +143,7 @@ fn main() {
             rep_cxl::utils::ycsb::OpType::Read => {
                 let obj = index.get(&op.key).expect("Key not found in index");
                 let start = std::time::Instant::now();
-                match obj.read() {
+                match rcxl.tmp_read(obj) {
                     Ok(rr) => {
                         match rr {
                             ReadReturn::ReadDirty(_) => dirty_reads += 1,
@@ -177,26 +180,27 @@ fn main() {
     let total_elapsed = start_total.elapsed();
 
     rcxl.stop();
+    std::thread::sleep(Duration::from_millis(1)); // improves stdout
 
 
     // report metrics
     let tput = workload.run_ops.len() as f64 / total_elapsed.as_secs_f64();
     
-    println!("YCSB run phase completed:");
+    println!("YCSB run phase complete.");
     println!("  Total operations: {}", workload.run_ops.len());
-    println!("  Total time: {}s", total_elapsed.as_secs_f64());
-    println!("  Throughput: {} ops/sec", tput);
+    println!("  Total time: {:.2}s", total_elapsed.as_secs_f64());
+    println!("  Throughput: {:.2} ops/sec", tput);
     println!("  Read errors: {}", read_errors);
     println!("  Write errors: {}", write_errors);
     println!("  Safe reads: {}", safe_reads);
     println!("  Dirty reads: {}", dirty_reads);
     if !read_latencies.is_empty() {
-        let avg_read_latency = read_latencies.iter().sum::<Duration>() / read_latencies.len() as u32;
-        println!("  Average read latency: {}μs", avg_read_latency.as_micros());
+        println!("  Read latencies");
+        utils::print_latency_stats(&read_latencies);
     }
     if !write_latencies.is_empty() {
-        let avg_write_latency = write_latencies.iter().sum::<Duration>() / write_latencies.len() as u32;
-        println!("  Average write latency: {}μs", avg_write_latency.as_micros());
+        println!("  Write latencies");
+        utils::print_latency_stats(&write_latencies);
     }
 
 }

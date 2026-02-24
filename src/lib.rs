@@ -244,7 +244,7 @@ pub struct RepCXL<T> {
     rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
     stop_flag: Arc<AtomicBool>,
-    logger: Option<utils::logger::Logger>,
+    logger: Option<utils::ms_logger::MonsterStateLogger>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -290,11 +290,35 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
     }
 
+    pub fn tmp_read(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
+        match safe_memio::mem_readall(obj.info.offset, &self.view.memory_nodes) {
+        Ok(states) => {
+                // check if all states are consistent (have the same wid (i.e. value))
+                // and get the latest wid with one pass
+                // println!("{:?}", states);
+                let (consistent, latest) = states.iter().skip(1).fold(
+                    (true, &states[0]),
+                    |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
+                );
+                // return based on consistency
+                if consistent {
+                    return Ok(ReadReturn::ReadSafe(latest.value));
+                } else {
+                    return Ok(ReadReturn::ReadDirty(latest.value));
+                };
+            },
+            Err(safe_memio::MemoryError(memory_node_id)) => {
+                Err(format!("Memory node {} failed during read", memory_node_id))
+            }
+        }
+
+    }
+
 
     /// Enable state logging to a file. Clears any existing log at the path.
     /// The algorithm thread will append state transitions to this file.
     pub fn enable_file_log(&mut self, path: &str) {
-        let mut log = utils::logger::Logger::new(path);
+        let mut log = utils::ms_logger::MonsterStateLogger::new(path);
         log.clear();
         self.logger = Some(log);
     }

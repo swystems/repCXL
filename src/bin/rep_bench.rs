@@ -2,7 +2,7 @@
 use clap::{value_parser, Arg};
 use log::{debug, error};
 use rand::Rng;
-use rep_cxl::RepCXL;
+use rep_cxl::{RepCXL, utils};
 use simple_logger;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -151,8 +151,8 @@ fn main() {
 
     loop {
         match (lats_rx.recv(), tput_rx.recv()) {
-            (Ok(l), Ok(t)) => {
-                lats_ns.append(&mut l.into_iter().map(|d| d.as_nanos()).collect());
+            (Ok(mut lvec), Ok(t)) => {
+                lats_ns.append(&mut lvec);
                 total_tputs.push(t);
             }
             _ => break,
@@ -170,28 +170,5 @@ fn main() {
         total_tputs.iter().sum::<f64>() / total_tputs.len() as f64
     );
     // let lats_ns: Vec<u128> = lats.into_iter().map(|d| d.as_nanos()).collect();
-    let mem_avg = lats_ns.iter().sum::<u128>() as f64 / attempts as f64;
-    let mem_max = lats_ns.iter().max().unwrap();
-    let mem_min = lats_ns.iter().min().unwrap();
-
-    println!("Round time {:?}, {attempts} runs", rcxl.config.round_time);
-    println!("Latency Avg: {:?}", Duration::from_nanos(mem_avg as u64));
-    println!("Latency Min: {:?}", Duration::from_nanos(*mem_min as u64));
-    println!(
-        "Latency 50th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.5) as u64)
-    );
-    println!(
-        "Latency 95th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.95) as u64)
-    );
-    println!(
-        "Latency 99th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.99) as u64)
-    );
-    println!(
-        "Latency 99.99th percentile: {:?}",
-        Duration::from_nanos(percentile(&lats_ns, 0.9999) as u64)
-    );
-    println!("Latency Max: {:?}", Duration::from_nanos(*mem_max as u64));
+    utils::print_latency_stats(&lats_ns);
 }
