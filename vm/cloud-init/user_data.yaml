@@ -1,0 +1,13 @@
+#cloud-config
+hostname: ubuntu24
+
+users:
+  - name: ansible
+    groups: sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ssh-ed25519 YOUR_PUBLIC_KEY_HERE
+
+package_update: true
+package_upgrade: false
