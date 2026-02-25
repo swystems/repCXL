@@ -1,0 +1,43 @@
+---
+- name: Provision QEMU CXL VM
+  hosts: vms
+  vars:
+    vm_id: 0
+    # ansible_user: ansible
+  tasks:
+    
+    - name: Install utils
+      package:
+        name: 
+        - curl
+        - build-essential
+        - htop
+        state: present
+      become: yes
+    
+    # - name: remove existing rustup and cargo
+    #   file:
+    #     path: "{{ item }}"
+    #     state: absent
+    #   loop:
+    #     - /home/{{ ansible_user }}/.rustup
+    #     - /home/{{ ansible_user }}/.cargo
+
+    - name: Install rust
+      shell: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+      args:
+        executable: /bin/bash
+      register: rust_install
+
+    - name: Show rust install output
+      debug:
+        var: rust_install
+
+    - name: Verify rust installation
+      shell: /home/{{ ansible_user }}/.cargo/bin/rustc --version
+      register: rustc_version
+      changed_when: false
+
+    - name: Show rustc version
+      debug:
+        var: rustc_version.stdout

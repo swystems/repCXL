@@ -1,6 +1,6 @@
 ---
-- name: Install cloud-init
-  hosts: all
+- name: Create QEMU CXL VM
+  hosts: servers
   vars:
     vm_id: 0
     cxl_numa_node: 0
@@ -27,14 +27,14 @@
         msg: "VM with id {{ vm_id }} exists, consider passing -e vm_id=<id>"
       when: vm_disk_stat.stat.exists
 
-    # - name: end host if vm disk already exists
-    #   meta: end_host
-    #   when: vm_disk_stat.stat.exists
+    - name: end host if vm disk already exists
+      meta: end_host
+      when: vm_disk_stat.stat.exists
     
-    # - name: Update package manager cache
-    #   package:
-    #     update_cache: yes
-    #   become: yes
+    - name: Update package manager cache
+      package:
+        update_cache: yes
+      become: yes
       
     - name: Install cloud-init
       package:

@@ -27,7 +27,7 @@ The VM starts in the background and its disk is created in `$HOME/repCXL-ansible
 
 Change `vm_id`
 
-    ansible-playbook -i inv/local.yml vm.create.yml -K -e vm_id=1
+    ansible-playbook -i inv/local.ini vm.create.yml -K -e vm_id=1
 
 ### SSH
 
@@ -47,3 +47,22 @@ Restart VMs (no need to run ansible again)
     cd $HOME/repCXL-ansible
     ./qemu_cxl.sh <vm_id> <cxl_numa_node>
 ```
+
+### Create a VM on a remote server
+
+Create another ansible inventory in `inv/remote.ini` with for remote servers info instead
+of localhost (requires passwordless SSH access). Run
+
+    ansible-playbook -i inv/remote.ini -K -e vm_id=0
+
+### Provision all VMs
+
+Edit inventory with the ports and hostnames of the running VMs then
+
+    ansible-playbook -i inv/local.ini vms.provision.yml -K
+
+### Clone and test this repo on all VMs
+
+Edit inventory with the ports and hostnames of the running VMs then
+
+    ansible-playbook -i inv/local.ini vms.deploy.yml -K
