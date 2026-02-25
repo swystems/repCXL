@@ -3,6 +3,7 @@
   hosts: all
   vars:
     vm_id: 0
+    cxl_numa_node: 0
     work_dir: /home/{{ ansible_facts['user_id'] }}/repCXL-ansible
     ansible_python_interpreter: /usr/bin/python3
     # ubuntu 24.04 image
@@ -26,9 +27,9 @@
         msg: "VM with id {{ vm_id }} exists, consider passing -e vm_id=<id>"
       when: vm_disk_stat.stat.exists
 
-    - name: end host if vm disk already exists
-      meta: end_host
-      when: vm_disk_stat.stat.exists
+    # - name: end host if vm disk already exists
+    #   meta: end_host
+    #   when: vm_disk_stat.stat.exists
     
     # - name: Update package manager cache
     #   package:
@@ -77,10 +78,19 @@
       template:
         src: "{{ item.src }}"
         dest: "{{ work_dir }}/{{ item.dest }}"
+        mode: '0744'
       loop:
         - { src: cloud-init/meta_data.j2, dest: meta_data.yaml }
         - { src: cloud-init/user_data.j2, dest: user_data.yaml }
-
+        - { src: qemu_cxl.sh, dest: qemu_cxl.sh }
     - name: create cloud-init seed iso
       command: >
-        cloud-localds {{ work_dir }}/seed.iso {{ work_dir }}/user_data.yaml {{ work_dir }}/meta_data.yaml
+        cloud-localds {{ work_dir }}/seed{{ vm_id }}.iso {{ work_dir }}/user_data.yaml {{ work_dir }}/meta_data.yaml
+
+    - name: create vm with QEMU and cloud-init
+      command: >
+        ./qemu_cxl.sh {{ vm_id }} {{ cxl_numa_node }}
+      args:
+        chdir: "{{ work_dir }}"
+      environment:
+        ANSIBLE_CREATE: "1"

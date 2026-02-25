@@ -7,7 +7,7 @@ users:
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
-      - ssh-ed25519 {{ ssh_ansible_key }}
+      - {{ ssh_ansible_key }}
 
 package_update: true
 package_upgrade: false
