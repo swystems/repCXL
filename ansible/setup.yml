@@ -1,0 +1,86 @@
+---
+- name: Install cloud-init
+  hosts: all
+  vars:
+    vm_id: 0
+    work_dir: /home/{{ ansible_facts['user_id'] }}/repCXL-ansible
+    ansible_python_interpreter: /usr/bin/python3
+    # ubuntu 24.04 image
+    image_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+    image_path: "{{ work_dir }}/ubuntu2404-server.img"
+    vm_disk_path: "{{ work_dir }}/vm{{ vm_id }}.qcow2"
+  tasks:
+    - name: create work directory
+      file:
+        path: "{{ work_dir }}"
+        state: directory
+        mode: '0755'
+    
+    - name: check if vm disk already exists
+      stat:
+        path: "{{ vm_disk_path }}"
+      register: vm_disk_stat
+    
+    - name: skip vm creation if disk already exists
+      debug:
+        msg: "VM with id {{ vm_id }} exists, consider passing -e vm_id=<id>"
+      when: vm_disk_stat.stat.exists
+
+    - name: end host if vm disk already exists
+      meta: end_host
+      when: vm_disk_stat.stat.exists
+    
+    # - name: Update package manager cache
+    #   package:
+    #     update_cache: yes
+    #   become: yes
+      
+    - name: Install cloud-init
+      package:
+        name: 
+        - cloud-image-utils
+        - qemu-system
+        state: present
+      become: yes
+      
+    - name: Download Ubuntu 24.04 image
+      get_url:
+        url: "{{ image_url }}"
+        dest: "{{ image_path }}"
+        mode: '0644'
+    
+    - name: Verify image download
+      stat:
+        path: "{{ image_path }}"
+      register: image_stat
+    
+    - name: create vm disk from base image
+      command: qemu-img create -f qcow2 -F qcow2 -b "{{ image_path }}" "{{ vm_disk_path }}" 20G
+      args:
+        creates: "{{ vm_disk_path }}"
+
+    - name: create ansible ssh key
+      command: ssh-keygen -t ed25519 -f /home/{{ ansible_facts['user_id'] }}/.ssh/ansible_key -N ""
+      args:
+        creates: /home/{{ ansible_facts['user_id'] }}/.ssh/ansible_key
+
+    - name: read ansible public key
+      slurp:
+        src: /home/{{ ansible_facts['user_id'] }}/.ssh/ansible_key.pub
+      register: ssh_ansible_key_file
+
+    - name: set ssh_ansible_key fact
+      set_fact:
+        ssh_ansible_key: "{{ ssh_ansible_key_file.content | b64decode | trim }}"
+    
+    - name: copy templates
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ work_dir }}/{{ item.dest }}"
+      loop:
+        - { src: cloud-init/meta_data.j2, dest: meta_data.yaml }
+        - { src: cloud-init/user_data.j2, dest: user_data.yaml }
+
+    - name: create cloud-init seed iso
+      command: >
+        cloud-localds {{ work_dir }}/seed.iso {{ work_dir }}/user_data.yaml {{ work_dir }}/meta_data.yaml
