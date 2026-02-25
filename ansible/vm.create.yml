@@ -4,6 +4,7 @@
   vars:
     vm_id: 0
     cxl_numa_node: 0
+    memory_nodes: 3
     work_dir: /home/{{ ansible_facts['user_id'] }}/repCXL-ansible
     ansible_python_interpreter: /usr/bin/python3
     # ubuntu 24.04 image
@@ -89,7 +90,7 @@
 
     - name: create vm with QEMU and cloud-init
       command: >
-        ./qemu_cxl.sh {{ vm_id }} {{ cxl_numa_node }}
+        ./qemu_cxl.sh {{ vm_id }} {{ cxl_numa_node }} {{ memory_nodes }}
       args:
         chdir: "{{ work_dir }}"
       environment:

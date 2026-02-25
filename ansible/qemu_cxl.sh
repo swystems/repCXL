@@ -11,15 +11,12 @@ set -e
 
 VM_ID=$1
 NUMA_NODE_CXL=$2
+MEMORY_NODES=$3
 
-if [ -z "$VM_ID" ] || [ -z "$NUMA_NODE_CXL" ]; then
-  echo "Usage: $0 <vm_id> <numa_node_cxl>"
+if [ -z "$VM_ID" ] || [ -z "$NUMA_NODE_CXL" ] || [ -z "$MEMORY_NODES" ]; then
+  echo "Usage: $0 <vm_id> <numa_node_cxl> <memory_nodes>"
   exit 1
 fi
-
-#create 1GiB of shared mem which will be mapped to CXL node
-truncate -s 1G /dev/shm/ivshmem
-chmod 666 /dev/shm/ivshmem
 
 QEMU_ARGS=(
     -name "repcxl-vm${VM_ID}"
@@ -29,13 +26,22 @@ QEMU_ARGS=(
     -smp 4
     --enable-kvm
     -object "memory-backend-ram,size=8G,host-nodes=0,policy=bind,prealloc=on,id=local-mem"
-    -object "memory-backend-file,size=1G,share=on,mem-path=/dev/shm/ivshmem,host-nodes=${NUMA_NODE_CXL},policy=bind,prealloc=on,id=cxl-mem"
-    -device ivshmem-plain,memdev=cxl-mem
     -drive "file=vm${VM_ID}.qcow2,format=qcow2"
     -net nic -net "user,hostfwd=tcp::222${VM_ID}-:22"
     -daemonize
     -display none
 )
+
+# create 1GiB shared memory files for ivshmem which will be mapped to the same
+# CXL memory region to simulate multiple memory nodes
+for node in $(seq 0 $((MEMORY_NODES-1))); do
+    truncate -s 1G /dev/shm/ivshmem${node}
+    chmod 666 /dev/shm/ivshmem${node}
+    QEMU_ARGS+=(
+        -object "memory-backend-file,size=1G,share=on,mem-path=/dev/shm/ivshmem${node},host-nodes=${NUMA_NODE_CXL},policy=bind,prealloc=on,id=cxl-mem${node}"
+        -device ivshmem-plain,memdev=cxl-mem${node}
+    )
+done
 
 # attach cloud-init seed on first boot
 if [[ "${ANSIBLE_CREATE:-0}" -eq 1 ]]; then

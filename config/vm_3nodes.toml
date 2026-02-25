@@ -1,0 +1,24 @@
+# RepCXL configuration file
+# Example usage: <binary> -c config/example.toml
+
+########## RepCXL global parameters
+mem_nodes = [
+"/sys/bus/pci/devices/0000:00:03.0/resource2", 
+"/sys/bus/pci/devices/0000:00:04.0/resource2",
+"/sys/bus/pci/devices/0000:00:05.0/resource2"
+] # List of memory nodes (required in practice)
+mem_size = 1_000_000_000 # 1 GB
+chunk_size = 64 # 64 bytes
+id = 0 # Unique identifier for the repCXL instance (required in practice)
+
+# List of process IDs in the cluster. Can be specified as:
+#   - A number (4) → generates IDs [0, 1, 2, 3]
+#   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
+#   - An array ([0, 1, 2, 3]) → explicit list of IDs
+processes = [0, 1]
+
+startup_delay = 1000000000 # (ns) Time to wait for all processes to start up (in nanoseconds)
+round_time = 100_000#_000 # (ns) Duration of the synchronous round (in nanoseconds)
+# Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
+algorithm = "monster"
+
