@@ -5,6 +5,7 @@
     repo_url: "https://github.com/swystems/repCXL.git"
     work_dir: "/home/{{ ansible_user }}"
     repo_dir: "{{ work_dir }}/repCXL"
+    ansible_python_interpreter: /usr/bin/python3
   tasks:
 
     - name: Install git

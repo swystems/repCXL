@@ -35,8 +35,10 @@ QEMU_ARGS=(
 # create 1GiB shared memory files for ivshmem which will be mapped to the same
 # CXL memory region to simulate multiple memory nodes
 for node in $(seq 0 $((MEMORY_NODES-1))); do
+    # create shared memory file for ivshmem
     truncate -s 1G /dev/shm/ivshmem${node}
     chmod 666 /dev/shm/ivshmem${node}
+    # QEMU map options
     QEMU_ARGS+=(
         -object "memory-backend-file,size=1G,share=on,mem-path=/dev/shm/ivshmem${node},host-nodes=${NUMA_NODE_CXL},policy=bind,prealloc=on,id=cxl-mem${node}"
         -device ivshmem-plain,memdev=cxl-mem${node}
@@ -44,7 +46,7 @@ for node in $(seq 0 $((MEMORY_NODES-1))); do
 done
 
 # attach cloud-init seed on first boot
-if [[ "${ANSIBLE_CREATE:-0}" -eq 1 ]]; then
+if [[ "${FIRST_BOOT:-0}" -eq 1 ]]; then
     QEMU_ARGS+=(-drive "file=seed${VM_ID}.iso,format=raw")
 fi
 

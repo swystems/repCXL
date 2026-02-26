@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc};
 use log::{error, warn};
 use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
-use safe_memio::{mem_readone, MemoryError};
+use safe_memio::{mem_readall, MemoryError};
 
 use super::*;
 
@@ -70,9 +70,21 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
         }
         match req_queue_rx.recv() {
             Ok(req) => {
-                match mem_readone(req.obj_info.offset, &view.memory_nodes) {
-                    Ok(ome) => {
-                        let result = ReadReturn::ReadDirty(ome.value);
+                match mem_readall(req.obj_info.offset, &view.memory_nodes) {
+                    Ok(states) => {
+                        // check if all states are consistent (have the same wid (i.e. value))
+                        // and get the latest wid with one pass
+                        // println!("{:?}", states);
+                        let (consistent, latest) = states.iter().skip(1).fold(
+                            (true, &states[0]),
+                            |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
+                        );
+                        // return based on consistency
+                        let result = if consistent {
+                            ReadReturn::ReadSafe(latest.value)
+                        } else {
+                            ReadReturn::ReadDirty(latest.value)
+                        };
                         if let Err(e) = req.ack_tx.send(result) {
                             error!("Failed to send read response: {}", e);
                         }

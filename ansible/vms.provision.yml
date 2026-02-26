@@ -2,8 +2,7 @@
 - name: Provision QEMU CXL VM
   hosts: vms
   vars:
-    vm_id: 0
-    # ansible_user: ansible
+    ansible_python_interpreter: /usr/bin/python3
   tasks:
     
     - name: Install utils
@@ -41,3 +40,28 @@
     - name: Show rustc version
       debug:
         var: rustc_version.stdout
+    
+    - name: Install redis
+      package:
+        name: redis
+        state: present
+      become: yes
+
+    - name: install Java and Maven
+      package:
+        name:
+        - default-jdk
+        - maven
+        - python-is-python3
+        state: present
+      become: yes
+
+    - name: clone YCSB
+      git:
+        repo: "https://github.com/brianfrankcooper/YCSB.git"
+        dest: "/home/{{ ansible_user }}/YCSB"
+    
+    - name: build YCSB Redis binding
+      shell: mvn -q -B -pl site.ycsb:redis-binding -am clean package -DskipTests
+      args:
+        chdir: "/home/{{ ansible_user }}/YCSB"

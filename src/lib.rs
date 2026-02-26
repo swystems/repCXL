@@ -484,6 +484,36 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         None
     }
 
+    /// Start the repCXL protocol threads without synchronization. Use `sync_start` 
+    /// for sync protocols.
+    pub fn start(&mut self) {
+        let algorithm = self.config.algorithm.clone();
+        let rt = Duration::from_nanos(self.config.round_time);
+        let start_time = std::time::SystemTime::now();
+        let v = self.view.clone();
+
+
+        // WRITE thread
+            {
+                let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
+                let logger = self.logger.take();
+                let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+                std::thread::spawn(move || {
+                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
+                });
+            }
+
+            // READ thread
+            {
+                let stop = self.stop_flag.clone();
+                let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
+                std::thread::spawn(move || {
+                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
+                });
+            }
+
+    }
+
     /// Synchronize processes in the group and start repCXL rounds.
     /// **assumes sync'ed clocks**
     /// All processes must call this function with the same group view to

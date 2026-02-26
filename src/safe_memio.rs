@@ -42,7 +42,7 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
 }
 
 /// Read the value from all memory nodes for the given object
-pub fn mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
+pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
 
     let node = mem_nodes.choose(&mut rand::rng()).unwrap();  // Returns Option<&T>
 

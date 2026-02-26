@@ -29,9 +29,21 @@ Change `vm_id`
 
     ansible-playbook -i inv/local.ini vm.create.yml -K -e vm_id=1
 
+### Provision all VMs
+
+Edit inventory with the ports and hostnames of the running VMs then
+
+    ansible-playbook -i inv/local.ini vms.provision.yml -K
+
+### Clone and test this repo on all VMs
+
+Edit inventory with the ports and hostnames of the running VMs then
+
+    ansible-playbook -i inv/local.ini vms.deploy.yml -K
+
 ### SSH
 
-    ssh ansible@localhost -p 222<vm_id>
+    ssh ansible@localhost -p 222<vm_id> -i ~/.ssh/ansible_key
 
 ### VM lifecycle post-creation
 
@@ -55,14 +67,16 @@ of localhost (requires passwordless SSH access). Run
 
     ansible-playbook -i inv/remote.ini -K -e vm_id=0
 
-### Provision all VMs
+### Find PCI devices mapped to shared (possibly CXL) memory from a VM
 
-Edit inventory with the ports and hostnames of the running VMs then
+QEMU maps shared memory to the VMs as ivmshmem devices, which correspond to PCIe
+devices. Run the following to get them
 
-    ansible-playbook -i inv/local.ini vms.provision.yml -K
+    >lspci | grep Inter-VM
+    00:03.0 RAM memory: Red Hat, Inc. Inter-VM shared memory (rev 01)
 
-### Clone and test this repo on all VMs
 
-Edit inventory with the ports and hostnames of the running VMs then
+The corresponding memory region is in `resource2`, in the above case
 
-    ansible-playbook -i inv/local.ini vms.deploy.yml -K
+    /sys/bus/pci/devices/0000:00:03.0/resource2
+

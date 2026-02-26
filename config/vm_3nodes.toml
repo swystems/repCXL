@@ -2,6 +2,9 @@
 # Example usage: <binary> -c config/example.toml
 
 ########## RepCXL global parameters
+
+# Memory nodes. In the VM setup, memory regions of the CXL node from the host 
+# are exposed as PCI devices with inter-vm shared memory 
 mem_nodes = [
 "/sys/bus/pci/devices/0000:00:03.0/resource2", 
 "/sys/bus/pci/devices/0000:00:04.0/resource2",
