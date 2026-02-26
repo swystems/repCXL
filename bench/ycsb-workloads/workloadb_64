@@ -1,0 +1,21 @@
+# YCSB workload B
+#
+# smaller record count
+# larger number of operations
+# 64-bit size vals
+
+fieldcount=1
+fieldlength=63
+
+recordcount=1000
+operationcount=10000
+workload=site.ycsb.workloads.CoreWorkload
+
+readallfields=true
+
+readproportion=0.95
+updateproportion=0.05
+scanproportion=0
+insertproportion=0
+
+requestdistribution=zipfian
