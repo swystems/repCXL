@@ -1,8 +1,6 @@
 ---
 - name: Provision QEMU CXL VM
   hosts: vms
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
   tasks:
     
     - name: Install utils
@@ -51,9 +49,9 @@
     - name: clone YCSB
       git:
         repo: "https://github.com/brianfrankcooper/YCSB.git"
-        dest: "/home/{{ ansible_user }}/YCSB"
+        dest: "{{ ycsb_remote_source_dir }}"
     
-    - name: build YCSB Redis binding
-      shell: mvn -q -B -pl site.ycsb:redis-binding -am clean package -DskipTests
+    - name: build YCSB core and Redis binding
+      shell: mvn -B -pl site.ycsb:core,site.ycsb:redis-binding -am package -DskipTests
       args:
-        chdir: "/home/{{ ansible_user }}/YCSB"
+        chdir: "{{ ycsb_remote_source_dir }}"

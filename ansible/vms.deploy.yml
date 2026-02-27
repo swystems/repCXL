@@ -1,28 +1,13 @@
 ---
 - name: Deploy repCXL from GitHub
   hosts: vms
-  vars:
-    repo_url: "https://github.com/swystems/repCXL.git"
-    work_dir: "/home/{{ ansible_user }}"
-    repo_dir: "{{ work_dir }}/repCXL"
-    ansible_python_interpreter: /usr/bin/python3
   tasks:
-
-    - name: Install git
-      package:
-        name: git
-        state: present
-      become: yes
-
-    - name: Clone repCXL repository
-      git:
-        repo: "{{ repo_url }}"
-        dest: "{{ repo_dir }}"
-        version: main
-        update: yes
-        force: yes
-
-    - name: Test build repCXL
-      shell: /home/{{ ansible_user }}/.cargo/bin/cargo test --release
-      args:
-        chdir: "{{ repo_dir }}"
+    - name: synchronize the content of this repo to remote hosts
+      synchronize:
+        src: "{{ local_repo }}"
+        dest: "{{ remote_dir }}"
+        rsync_opts:
+          - "--exclude=.git/"
+          - "--exclude=target/"
+          - "--exclude=jupyter/"
+          - "--exclude=test/"

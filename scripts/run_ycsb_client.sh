@@ -4,13 +4,16 @@
 set -e
 
 VM_ID=$1
+WORKLOAD=$2
 
 if [ -z "$VM_ID" ]; then
     echo "Usage: $0 <vm_id>"
     exit 1
 fi
 
-WORKLOAD=workloada_64
+if [ -z "$WORKLOAD" ]; then
+    WORKLOAD=workloada_64
+fi
 
 export RUST_LOG=info 
 

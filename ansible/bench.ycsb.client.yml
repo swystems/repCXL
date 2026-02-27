@@ -1,26 +1,7 @@
 - name: Run YCSB cliient benchmark
   hosts: vms
   gather_facts: no
-
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
-    # bench variables
-    local_repo: "{{ playbook_dir }}/.."
-    local_result_folder: "{{ local_repo }}/bench-outputs/"
-    remote_dir: "/home/{{ ansible_user }}/repCXL-bench/"
-    remote_result_file: "{{ remote_dir }}/bench_out.txt"
-
   tasks: 
-    - name: quick deploy this repository
-      synchronize:
-        src: "{{ local_repo }}/"
-        dest: "{{ remote_dir }}"
-        rsync_opts:
-          - "--exclude=.git/"
-          - "--exclude=target/"
-          - "--exclude=jupyter/"
-          - "--exclude=test/"
-      
     - name: build repCXL client
       shell: |
         source $HOME/.cargo/env
@@ -30,22 +11,22 @@
         chdir: "{{ remote_dir }}"
 
     - name: run repCXL client coordinator
-      shell: scripts/run_ycsb_client.sh {{ vm_id }} > {{ remote_result_file }}
+      shell: scripts/run_ycsb_client.sh {{ vm_id }}  {{ ycsb_workload }} > bench_out.txt
       args:
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
       become: true
-      when: coordinator_id == vm_id
+      when: repcxl_coordinator_id == vm_id
       async: true
       poll: 0
 
     - name: run repCXL client replica
-      shell: scripts/run_ycsb_client.sh {{ vm_id }} > {{ remote_result_file }}
+      shell: scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} > bench_out.txt
       args:
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
       become: true
-      when: coordinator_id != vm_id
+      when: repcxl_coordinator_id != vm_id
 
     - name: ensure local output directory exists
       delegate_to: localhost
@@ -57,7 +38,7 @@
 
     - name: fetch bench_out.txt from remote hosts
       fetch:
-        src: "{{ remote_result_file }}"
+        src: "{{ remote_dir }}/bench_out.txt"
         dest: "{{ local_result_folder }}/{{ inventory_hostname }}.txt"
         flat: yes
 

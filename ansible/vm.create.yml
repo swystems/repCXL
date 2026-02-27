@@ -1,23 +1,19 @@
 ---
 - name: Create QEMU CXL VM
   hosts: servers
-  vars:
-    vm_id: 0
-    cxl_numa_node: 0
-    memory_nodes: 3
-    force: false
-    work_dir: /home/{{ ansible_facts['user_id'] }}/repCXL-ansible
-    ansible_python_interpreter: /usr/bin/python3
-    # ubuntu 24.04 image
-    image_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
-    image_path: "{{ work_dir }}/ubuntu2404-server.img"
-    vm_disk_path: "{{ work_dir }}/vm{{ vm_id }}.qcow2"
   tasks:
     - name: create work directory
       file:
-        path: "{{ work_dir }}"
+        path: "{{ host_vm_files_dir }}"
         state: directory
         mode: '0755'
+
+    - name: debug variables
+      debug:
+        msg:
+        - "host_vm_files_dir={{ host_vm_files_dir }}"
+        - "image_path={{ image_path }}"
+        - "vm_disk_path={{ vm_disk_path }}"
     
     - name: check if vm disk already exists
       stat:
@@ -62,14 +58,22 @@
       stat:
         path: "{{ image_path }}"
       register: image_stat
-    
-    
+  
+    - name: debug variables
+      debug:
+        msg:
+        - "host_vm_files_dir={{ host_vm_files_dir }}"
+        - "image_path={{ image_path }}"
+        - "vm_disk_path={{ vm_disk_path }}"
+     
 
     - name: create vm disk from base image
-      command: qemu-img create -f qcow2 -F qcow2 -b "{{ image_path }}" "{{ vm_disk_path }}" 20G
+      shell: qemu-img create -f qcow2 -F qcow2 -b {{ abs_image_path }} {{ vm_disk_path }} 20G
       args:
-        creates: "{{ vm_disk_path }}"
-
+        executable: /bin/bash
+      vars:
+        abs_image_path: /home/{{ ansible_facts['user_id'] }}/{{ image_path }}
+   
     - name: create ansible ssh key
       command: ssh-keygen -t ed25519 -f ~/.ssh/ansible_key -N ""
       args:
@@ -90,7 +94,7 @@
     - name: copy templates
       template:
         src: "{{ item.src }}"
-        dest: "{{ work_dir }}/{{ item.dest }}"
+        dest: "{{ host_vm_files_dir }}/{{ item.dest }}"
         mode: '0744'
       loop:
         - { src: cloud-init/meta_data.j2, dest: meta_data.yaml }
@@ -98,13 +102,13 @@
         - { src: qemu_cxl.sh, dest: qemu_cxl.sh }
     - name: create cloud-init seed iso
       command: >
-        cloud-localds {{ work_dir }}/seed{{ vm_id }}.iso {{ work_dir }}/user_data.yaml {{ work_dir }}/meta_data.yaml
+        cloud-localds {{ host_vm_files_dir }}/seed{{ vm_id }}.iso {{ host_vm_files_dir }}/user_data.yaml {{ host_vm_files_dir }}/meta_data.yaml
 
     - name: create vm with QEMU and cloud-init
       command: >
         ./qemu_cxl.sh {{ vm_id }} {{ cxl_numa_node }} {{ memory_nodes }}
       args:
-        chdir: "{{ work_dir }}"
+        chdir: "{{ host_vm_files_dir }}"
       environment:
         FIRST_BOOT: "1"
       become: yes

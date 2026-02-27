@@ -1,0 +1,14 @@
+- name: Run YCSB cliient benchmark
+  hosts: vms
+  gather_facts: no
+  tasks:
+    - name: generate workload file for YCSB client
+      shell: |
+        bin/ycsb load basic -P {{ remote_abs }}/ycsb/workloads/{{ ycsb_workload }} > {{ remote_abs }}/ycsb/traces/{{ ycsb_workload }}_load.log
+        bin/ycsb run basic -P {{ remote_abs }}/ycsb/workloads/{{ ycsb_workload }} > {{ remote_abs }}/ycsb/traces/{{ ycsb_workload }}_run.log
+      vars:
+        remote_abs: "/home/{{ansible_user}}/{{ remote_dir }}"
+      args:
+        executable: /bin/bash
+        chdir: "{{ ycsb_remote_source_dir }}"
+
