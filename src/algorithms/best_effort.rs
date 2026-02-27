@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc};
 use log::{error, warn};
 use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
-use safe_memio::{mem_readall, MemoryError};
+use safe_memio::{mem_readall, mem_writeall, MemoryError};
 
 use super::*;
 
@@ -131,19 +131,19 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
             Ok(req) => {
                 // write data to all memory nodes
                 let (oi, data, ack_tx) = req.to_tuple();
-                for node in &view.memory_nodes {
-                    let addr = node.addr_at(oi.offset) as *mut ObjectMemoryEntry<T>;
-                    let entry = ObjectMemoryEntry::new_nowid(data);
-                    safe_memio::safe_write(addr, entry).unwrap_or_else(|e| {
-                        error!(
-                            "Safe write failed at node {}, obj id: {} offset {}: {}",
-                            node.id, oi.id, oi.offset, e
-                        );
-                    });
-                }
-
-                if let Err(e) = ack_tx.send(true) {
-                        error!("Failed to send ack: {}", e);
+                let ome = ObjectMemoryEntry::new_nowid(data);
+                
+                match mem_writeall(oi.offset, ome, &view.memory_nodes) {
+                    Ok(()) => {
+                        // send ack to client
+                        if let Err(_) = ack_tx.send(true) {
+                            error!("Failed to send ack");
+                        }
+                    },
+                    Err(MemoryError(memory_node_id)) => {
+                        error!("Memory node {} failed during write replication", memory_node_id);
+                        break;
+                    }
                 }
             },
             Err(e) => {

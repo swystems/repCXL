@@ -13,7 +13,7 @@ use crate::ObjectMemoryEntry;
 use crate::shmem::MemoryNode;
 use log::error;
 
-const FAILURE_PROBABILITY: f32 = 0.0; // 1% chance of failure
+const FAILURE_PROBABILITY: f32 = 0.0;
 
 #[derive(Debug)]
 pub struct MemoryError(pub usize);
