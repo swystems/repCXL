@@ -5,7 +5,7 @@
     vm_id: 0
     cxl_numa_node: 0
     memory_nodes: 3
-    force_create: false
+    force: false
     work_dir: /home/{{ ansible_facts['user_id'] }}/repCXL-ansible
     ansible_python_interpreter: /usr/bin/python3
     # ubuntu 24.04 image
@@ -29,9 +29,15 @@
         msg: "VM with id {{ vm_id }} exists, consider passing -e vm_id=<id>"
       when: vm_disk_stat.stat.exists
 
+    - name: delete existing disk if force provided
+      file:
+        path: "{{ vm_disk_path }}"
+        state: absent
+      when: force | bool and vm_disk_stat.stat.exists
+
     - name: end host if vm disk already exists
       meta: end_host
-      when: vm_disk_stat.stat.exists and not force_create
+      when: vm_disk_stat.stat.exists and not force | bool
     
     - name: Update package manager cache
       package:
@@ -57,6 +63,8 @@
         path: "{{ image_path }}"
       register: image_stat
     
+    
+
     - name: create vm disk from base image
       command: qemu-img create -f qcow2 -F qcow2 -b "{{ image_path }}" "{{ vm_disk_path }}" 20G
       args:

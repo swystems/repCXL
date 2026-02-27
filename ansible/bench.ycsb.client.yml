@@ -1,0 +1,71 @@
+- name: Run YCSB cliient benchmark
+  hosts: vms
+  gather_facts: no
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    # bench variables
+    local_repo: "{{ playbook_dir }}/.."
+    local_result_folder: "{{ local_repo }}/bench-outputs/"
+    remote_dir: "/home/{{ ansible_user }}/repCXL-bench/"
+    remote_result_file: "{{ remote_dir }}/bench_out.txt"
+
+  tasks: 
+    - name: quick deploy this repository
+      synchronize:
+        src: "{{ local_repo }}/"
+        dest: "{{ remote_dir }}"
+        rsync_opts:
+          - "--exclude=.git/"
+          - "--exclude=target/"
+          - "--exclude=jupyter/"
+          - "--exclude=test/"
+      
+    - name: build repCXL client
+      shell: |
+        source $HOME/.cargo/env
+        cargo build --release --bin ycsb_client
+      args: 
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+
+    - name: run repCXL client coordinator
+      shell: scripts/run_ycsb_client.sh {{ vm_id }} > {{ remote_result_file }}
+      args:
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+      become: true
+      when: coordinator_id == vm_id
+      async: true
+      poll: 0
+
+    - name: run repCXL client replica
+      shell: scripts/run_ycsb_client.sh {{ vm_id }} > {{ remote_result_file }}
+      args:
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+      become: true
+      when: coordinator_id != vm_id
+
+    - name: ensure local output directory exists
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: "{{ local_result_folder }}"
+        state: directory
+        mode: '0755'
+
+    - name: fetch bench_out.txt from remote hosts
+      fetch:
+        src: "{{ remote_result_file }}"
+        dest: "{{ local_result_folder }}/{{ inventory_hostname }}.txt"
+        flat: yes
+
+    - name: aggregate remote outputs to single local file
+      delegate_to: localhost
+      run_once: true
+      shell: |
+        cat "{{ local_result_folder }}"*.txt > "{{ local_result_folder }}/bench_aggregated.txt"
+      args:
+        executable: /bin/bash
+

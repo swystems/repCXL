@@ -14,14 +14,6 @@
         state: present
       become: yes
     
-    # - name: remove existing rustup and cargo
-    #   file:
-    #     path: "{{ item }}"
-    #     state: absent
-    #   loop:
-    #     - /home/{{ ansible_user }}/.rustup
-    #     - /home/{{ ansible_user }}/.cargo
-
     - name: Install rust
       shell: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
       args:

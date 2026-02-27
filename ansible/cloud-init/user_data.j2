@@ -1,11 +1,15 @@
 #cloud-config
 hostname: vm{{ vm_id }}
 
+ssh_pwauth: true
+
 users:
   - name: ansible
     groups: sudo
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
+    plain_text_passwd: ansible
+    lock_passwd: false
     ssh_authorized_keys:
       - {{ ssh_ansible_key }}
 

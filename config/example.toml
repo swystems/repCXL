@@ -11,7 +11,7 @@ id = 0 # Unique identifier for the repCXL instance (required in practice)
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = [0, 1]
+processes = [0, 1, 2, 3]
 
 startup_delay = 1000000000 # (ns) Time to wait for all processes to start up (in nanoseconds)
 round_time = 100_000#_000 # (ns) Duration of the synchronous round (in nanoseconds)

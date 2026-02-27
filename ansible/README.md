@@ -5,8 +5,10 @@
 - ansible 
 
 ```sh
-pipx install ansible-core
+pipx install ansible ansible-core
 pipx ensurepath
+# some required collections
+ansible-galaxy collection install ansible.posix
 ```
 
 - 16GB memory (change the parameters in `cxl_vm.sh` otherwise)
@@ -20,6 +22,7 @@ pipx ensurepath
     cd ansible 
     ansible-playbook -i inv/local.yml vm.create.yml -K -e vm_id=0
 
+and enter sudo password.
 
 The VM starts in the background and its disk is created in `$HOME/repCXL-ansible/vm<vm_id>.qcow2`
 
@@ -28,6 +31,18 @@ The VM starts in the background and its disk is created in `$HOME/repCXL-ansible
 Change `vm_id`
 
     ansible-playbook -i inv/local.ini vm.create.yml -K -e vm_id=1
+
+### Force the re-creation of a VM
+Make sure all VMs are stopped and add `-e force=true`
+
+```sh
+pkill qemu # on the host machine
+```
+
+```sh
+# locally
+ansible-playbook -i inv/local.ini vm.create.yml -K -e vm_id=1 -e force=true
+```
 
 ### Provision all VMs
 
