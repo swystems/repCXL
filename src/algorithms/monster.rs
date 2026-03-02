@@ -313,3 +313,33 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
     }
 
 }
+
+
+/// Same as monster_read but is called directly by the client
+pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
+    view: crate::GroupView,
+    obj: &crate::RepCXLObject<T>,
+) -> Result<ReadReturn<T>, String> {
+
+    match mem_readall(obj.info.offset, &view.memory_nodes) {
+        Ok(states) => {
+            // check if all states are consistent (have the same wid (i.e. value))
+            // and get the latest wid with one pass
+            // println!("{:?}", states);
+            let (consistent, latest) = states.iter().skip(1).fold(
+                (true, &states[0]),
+                |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
+            );
+            // return based on consistency
+            let result = if consistent {
+                ReadReturn::ReadSafe(latest.value)
+            } else {
+                ReadReturn::ReadDirty(latest.value)
+            };
+            Ok(result)
+        },
+        Err(MemoryError(memory_node_id)) => {
+            Err(format!("Memory node {} failed during read", memory_node_id))
+        }
+    }
+}

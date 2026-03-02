@@ -2,6 +2,19 @@
   hosts: vms
   gather_facts: no
   tasks: 
+
+    - name: synchronize the content of this repo to remote hosts
+      synchronize:
+        src: "{{ local_repo }}"
+        dest: "{{ remote_dir }}"
+        rsync_opts:
+          - "--exclude=.git/"
+          - "--exclude=target/"
+          - "--exclude=jupyter/"
+          - "--exclude=test/"
+          - "--exclude=ansible/"
+          - "--exclude=ycsb/"
+
     - name: build repCXL client
       shell: |
         source $HOME/.cargo/env
@@ -13,8 +26,8 @@
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client coordinator
       shell: |
-        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} 2>&1) \
-          && echo "$output" | tee bench_out.txt \
+        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
+          && echo "$output" | tee bench_out.dat \
           || { echo "$output" >&2; exit 1; }
       args:
         executable: /bin/bash
@@ -27,8 +40,8 @@
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client replica
       shell: |
-        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} 2>&1) \
-          && echo "$output" | tee bench_out.txt \
+        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
+          && echo "$output" | tee bench_out.dat \
           || { echo "$output" >&2; exit 1; }
       args:
         executable: /bin/bash
@@ -44,17 +57,17 @@
         state: directory
         mode: '0755'
 
-    - name: fetch bench_out.txt from remote hosts
+    - name: fetch bench_out.dat from remote hosts
       fetch:
-        src: "{{ remote_dir }}/bench_out.txt"
-        dest: "{{ local_result_folder }}/{{ inventory_hostname }}.txt"
+        src: "{{ remote_dir }}/bench_out.dat"
+        dest: "{{ local_result_folder }}/{{ inventory_hostname }}.dat"
         flat: yes
 
     - name: aggregate remote outputs to single local file
       delegate_to: localhost
       run_once: true
       shell: |
-        cat "{{ local_result_folder }}"*.txt > "{{ local_result_folder }}/bench_aggregated.txt"
+        cat "{{ local_result_folder }}"*.dat > "{{ local_result_folder }}/bench_aggregated.txt"
       args:
         executable: /bin/bash
 

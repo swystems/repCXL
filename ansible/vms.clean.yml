@@ -1,0 +1,16 @@
+---
+- name: Deploy repCXL from GitHub
+  hosts: vms
+  tasks:
+    - name: clean up the remote directory
+      file:
+        path: "{{ remote_dir }}"
+        state: absent
+
+    - name: kill repcxl processes
+      shell: |
+        pkill -f ycsb_client || true
+        pkill -f repcxl || true
+      args:
+        executable: /bin/bash
+      become: true

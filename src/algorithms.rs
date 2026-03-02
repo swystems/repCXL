@@ -1,11 +1,11 @@
 use log::{debug, error};
 use std::sync::atomic::{AtomicBool};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::safe_memio;
+use crate::{RepCXLObject, safe_memio};
 use crate::GroupView;
-use crate::{WriteRequest,ReadRequest};
+use crate::{WriteRequest,ReadRequest,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
 
 pub mod best_effort;
@@ -46,6 +46,17 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_read,
         "monster" => monster::monster_read,
+        _ => panic!("Unknown algorithm, check config: {}", algorithm),
+    }
+}
+
+
+pub fn get_read_algorithm_client<T: Copy + PartialEq + std::fmt::Debug>(
+    algorithm: &String, group_view: GroupView, obj: &RepCXLObject<T>,
+) -> Result<ReadReturn<T>, String> {
+    match algorithm.as_str() {
+        "async_best_effort" => best_effort::async_best_effort_read_client(group_view, obj),
+        "monster" => monster::monster_read_client(group_view, obj),
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }

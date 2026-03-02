@@ -23,8 +23,8 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
             break;
         }
 
-        match req_queue_rx.try_recv() {
-            Ok(Some(req)) => {
+        match req_queue_rx.recv() {
+            Ok(req) => {
                 // write data to all memory nodes
                 let (oi, data, ack_tx) = req.to_tuple();
                 for node in &view.memory_nodes {
@@ -42,18 +42,9 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
                         error!("Failed to send ack: {}", e);
                 }
             },
-            Ok(None) => (), // no request, continue to next round
             Err(e) => {
-                match e {
-                    kanal::ReceiveError::Closed => {
-                        info!("Object queue channel closed: {}", e);
-                        break; // exit thread
-                    },
-                    kanal::ReceiveError::SendClosed => {
-                        info!("Send object queue channel closed: {}", e);
-                        break; // exit thread
-                    }
-                }
+                info!("Object queue channel closed: {}", e);
+                break; // exit thread
             }
         }
     }
@@ -76,18 +67,14 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
             Ok(req) => {
                 match mem_readall(req.obj_info.offset, &view.memory_nodes) {
                     Ok(states) => {
-                        // check if all states are consistent (have the same wid (i.e. value))
-                        // and get the latest wid with one pass
-                        // println!("{:?}", states);
-                        let (consistent, latest) = states.iter().skip(1).fold(
-                            (true, &states[0]),
-                            |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
-                        );
+                        // check if all states are consistent by VALUE since best effort does not use WID
+
+                        let consistent = states.iter().all(|s| s.value == states[0].value);
                         // return based on consistency
                         let result = if consistent {
-                            ReadReturn::ReadSafe(latest.value)
+                            ReadReturn::ReadSafe(states[0].value)
                         } else {
-                            ReadReturn::ReadDirty(latest.value)
+                            ReadReturn::ReadDirty(states[0].value)
                         };
                         if let Err(e) = req.ack_tx.send(result) {
                             error!("Failed to send read response: {}", e);
@@ -102,6 +89,31 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
                 log::info!("[READ] Read request channel closed: {}", e);
                 break; // exit thread
             }
+        }
+    }
+}
+
+
+pub fn async_best_effort_read_client<T: Copy + PartialEq + std::fmt::Debug>(
+    view: crate::GroupView,
+    obj: &crate::RepCXLObject<T>,
+) -> Result<ReadReturn<T>, String> {
+
+    match mem_readall(obj.info.offset, &view.memory_nodes) {
+        Ok(states) => {
+            // check if all states are consistent by VALUE since best effort does not use WID
+
+            let consistent = states.iter().all(|s: &ObjectMemoryEntry<T>| s.value == states[0].value);
+            // return based on consistency
+            let result = if consistent {
+                ReadReturn::ReadSafe(states[0].value)
+            } else {
+                ReadReturn::ReadDirty(states[0].value)
+            };
+            Ok(result)
+        },
+        Err(MemoryError(memory_node_id)) => {
+            Err(format!("Memory node {} failed during read", memory_node_id))
         }
     }
 }
@@ -168,3 +180,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
         (round_num, next_round) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
     }
 }
+
+
+
+

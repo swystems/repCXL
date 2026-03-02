@@ -143,7 +143,7 @@ fn main() {
             rep_cxl::utils::ycsb::OpType::Read => {
                 let obj = index.get(&op.key).expect("Key not found in index");
                 let start = std::time::Instant::now();
-                match rcxl.tmp_read(obj) {
+                match rcxl.read_object(obj) {
                     Ok(rr) => {
                         match rr {
                             ReadReturn::ReadDirty(_) => dirty_reads += 1,

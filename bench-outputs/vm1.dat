@@ -1,0 +1,60 @@
+
+YCSB workload
+  1000 load ops, 10000000 run ops
+  record_count=1000, field_count=1, field_length=63
+  read=0.5, update=0.5, insert=0, scan=0
+  distribution=zipfian
+  unique keys: 1000
+
+DEBUG [ycsb_client] First 5 load operations:
+DEBUG [ycsb_client]   [0] Insert user6284781860667377211 field0=[63B]
+DEBUG [ycsb_client]   [1] Insert user8517097267634966620 field0=[62B]
+DEBUG [ycsb_client]   [2] Insert user1820151046732198393 field0=[63B]
+DEBUG [ycsb_client]   [3] Insert user4052466453699787802 field0=[63B]
+DEBUG [ycsb_client]   [4] Insert user3232700585171816769 field0=[63B]
+INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
+INFO  [rep_cxl] Process 1 ready and waiting to start
+DEBUG [rep_cxl] Process 1 waiting for start...
+DEBUG [rep_cxl] Process 1 waiting for start...
+DEBUG [rep_cxl] Process 1 waiting for start...
+DEBUG [rep_cxl] Process 1 waiting for start...
+DEBUG [rep_cxl] Process 1 waiting for start...
+INFO  [rep_cxl] Process 1 sees round starting time set to SystemTime { tv_sec: 1772475074, tv_nsec: 82534445 }
+DEBUG [ycsb_client] First 10 run operations:
+DEBUG [ycsb_client]   [0] Update user6772299462829809208 field0=[63B]
+DEBUG [ycsb_client]   [1] Read user2041640442664200590
+DEBUG [ycsb_client]   [2] Update user4736362660161462247 field0=[63B]
+DEBUG [ycsb_client]   [3] Update user1829523410770733755 field0=[63B]
+DEBUG [ycsb_client]   [4] Read user8768165322001154364
+DEBUG [ycsb_client]   [5] Update user1574547450115260661 field0=[63B]
+DEBUG [ycsb_client]   [6] Update user2865750847917140739 field0=[63B]
+DEBUG [ycsb_client]   [7] Update user7460881851310751334 field0=[63B]
+DEBUG [ycsb_client]   [8] Update user5912804296099134935 field0=[63B]
+DEBUG [ycsb_client]   [9] Read user5580337714515754016
+DEBUG [ycsb_client]   ... (9999990 more)
+INFO  [ycsb_client] Executing YCSB run phase...
+INFO  [rep_cxl] Stopping repCXL process 1. Goodbye...
+YCSB run phase complete.
+  Total operations: 10000000
+  Total time: 11.87s
+  Throughput: 842232.63 ops/sec
+  Read errors: 0
+  Write errors: 0
+  Safe reads: 5000515
+  Dirty reads: 1928
+  Read latencies
+    avg:	861ns
+    P50:	835ns (median)
+    P90:	974ns
+    P99:	1.06μs
+    P99.99:	7.62μs
+    P100:	21.41μs
+  Write latencies
+    avg:	1.25μs
+    P50:	1.23μs (median)
+    P90:	1.32μs
+    P99:	1.69μs
+    P99.99:	10.07μs
+    P100:	1.15ms
+INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
+INFO  [rep_cxl::algorithms::best_effort] [READ] Read request channel closed: receive from a closed channel

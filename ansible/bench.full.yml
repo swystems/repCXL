@@ -1,0 +1,4 @@
+---
+# - import_playbook: vms.deploy.yml
+- import_playbook: gen.ycsb.workload.yml
+- import_playbook: bench.ycsb.client.yml

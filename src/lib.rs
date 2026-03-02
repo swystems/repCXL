@@ -5,9 +5,8 @@ use log::{debug, error, info, warn};
 
 use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
-use kanal::unbounded;
 
 mod algorithms;
 mod safe_memio;
@@ -314,6 +313,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
 
     }
+
+
+    pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
+        algorithms::get_read_algorithm_client(
+            &self.config.algorithm,
+            self.view.clone(), 
+            obj)
+    }
+
 
 
     /// Enable state logging to a file. Clears any existing log at the path.
