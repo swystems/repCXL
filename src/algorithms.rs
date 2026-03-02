@@ -22,7 +22,7 @@ pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     GroupView,
     SystemTime,
     Duration,
-    mpsc::Receiver<WriteRequest<T>>,
+    kanal::Receiver<WriteRequest<T>>,
     Arc<AtomicBool>,
     Option<MonsterStateLogger>,
 ) {
@@ -40,7 +40,7 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     GroupView,
     SystemTime,
     Duration,
-    mpsc::Receiver<ReadRequest<T>>,
+    kanal::Receiver<ReadRequest<T>>,
     Arc<AtomicBool>,
 ) {
     match algorithm.as_str() {

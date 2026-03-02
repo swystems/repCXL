@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
-use log::{error, warn};
+use std::sync::Arc;
+use log::{info,error};
 use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
 use safe_memio::{mem_readall, mem_writeall, MemoryError};
@@ -13,7 +13,7 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     _start_time: SystemTime,
     _round_time: Duration,
-    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
+    req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
     _log_path: Option<MonsterStateLogger>,
 ) {
@@ -24,7 +24,7 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
         }
 
         match req_queue_rx.try_recv() {
-            Ok(req) => {
+            Ok(Some(req)) => {
                 // write data to all memory nodes
                 let (oi, data, ack_tx) = req.to_tuple();
                 for node in &view.memory_nodes {
@@ -42,11 +42,15 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
                         error!("Failed to send ack: {}", e);
                 }
             },
+            Ok(None) => (), // no request, continue to next round
             Err(e) => {
                 match e {
-                    mpsc::TryRecvError::Empty => (),
-                    mpsc::TryRecvError::Disconnected => {
-                        warn!("Object queue channel closed: {}", e);
+                    kanal::ReceiveError::Closed => {
+                        info!("Object queue channel closed: {}", e);
+                        break; // exit thread
+                    },
+                    kanal::ReceiveError::SendClosed => {
+                        info!("Send object queue channel closed: {}", e);
                         break; // exit thread
                     }
                 }
@@ -60,7 +64,7 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     _start_time: SystemTime,
     _round_time: Duration,
-    req_queue_rx: mpsc::Receiver<ReadRequest<T>>,
+    req_queue_rx: kanal::Receiver<ReadRequest<T>>,
     stop_flag: Arc<AtomicBool>,
 ) {
 
@@ -107,7 +111,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     start_time: SystemTime,
     round_time: Duration,
-    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
+    req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
     _logger: Option<MonsterStateLogger>,
 ) {
@@ -128,7 +132,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
         );
 
         match req_queue_rx.try_recv() {
-            Ok(req) => {
+            Ok(Some(req)) => {
                 // write data to all memory nodes
                 let (oi, data, ack_tx) = req.to_tuple();
                 let ome = ObjectMemoryEntry::new_nowid(data);
@@ -146,11 +150,15 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
                     }
                 }
             },
+            Ok(None) => (), // no request, continue to next round
             Err(e) => {
                 match e {
-                    mpsc::TryRecvError::Empty => (),
-                    mpsc::TryRecvError::Disconnected => {
-                        warn!("Object queue channel closed: {}", e);
+                    kanal::ReceiveError::Closed => {
+                        info!("Object queue channel closed: {}", e);
+                        break; // exit thread
+                    },
+                    kanal::ReceiveError::SendClosed => {
+                        info!("Send object queue channel closed: {}", e);
                         break; // exit thread
                     }
                 }

@@ -20,6 +20,5 @@ bpsleep
 *.iso
 ibmvm.sh
 
-# Added by cargo
-
-/target
+# local deployment files
+repCXL-ansible/

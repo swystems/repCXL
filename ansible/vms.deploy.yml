@@ -11,3 +11,4 @@
           - "--exclude=target/"
           - "--exclude=jupyter/"
           - "--exclude=test/"
+          - "--exclude=ansible/"

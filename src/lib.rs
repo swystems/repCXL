@@ -7,6 +7,7 @@ use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
+use kanal::unbounded;
 
 mod algorithms;
 mod safe_memio;
@@ -76,11 +77,11 @@ impl PartialEq for GroupView {
 pub struct WriteRequest<T> {
     pub(crate) obj_info: ObjectInfo,
     pub data: T,
-    pub ack_tx: mpsc::Sender<bool>,
+    pub ack_tx: kanal::Sender<bool>,
 }
 
 impl<T> WriteRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
+    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: kanal::Sender<bool>) -> Self {
         WriteRequest {
             obj_info,
             data,
@@ -88,18 +89,18 @@ impl<T> WriteRequest<T> {
         }
     }
 
-    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, mpsc::Sender<bool>) {
+    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, kanal::Sender<bool>) {
         (self.obj_info, self.data, self.ack_tx)
     }
 }
 
 pub struct ReadRequest<T> {
     pub(crate) obj_info: ObjectInfo,
-    pub ack_tx: mpsc::Sender<ReadReturn<T>>,
+    pub ack_tx: kanal::Sender<ReadReturn<T>>,
 }
 
 impl<T> ReadRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: mpsc::Sender<ReadReturn<T>>) -> Self {
+    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: kanal::Sender<ReadReturn<T>>) -> Self {
         ReadRequest { obj_info, ack_tx }
     }
 }
@@ -112,8 +113,8 @@ pub enum ReadReturn<T> {
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T: Copy> {
-    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
-    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
+    wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
+    rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     info: ObjectInfo, // could also just store the offset
 }
 
@@ -122,8 +123,8 @@ impl<T: Copy> RepCXLObject<T> {
         id: usize,
         offset: usize,
         size: usize,
-        wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
-        rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
+        wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
+        rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     ) -> Self {
         RepCXLObject {
             wreq_queue_tx,
@@ -133,7 +134,7 @@ impl<T: Copy> RepCXLObject<T> {
     }
 
     pub fn write(&self, data: T) -> Result<(), String> {
-        let (ack_tx, ack_rx) = mpsc::channel();
+        let (ack_tx, ack_rx) = kanal::unbounded();
         let req = WriteRequest::new(self.info, data, ack_tx);
 
         self.wreq_queue_tx
@@ -149,7 +150,7 @@ impl<T: Copy> RepCXLObject<T> {
     }
 
     pub fn read(&self) -> Result<ReadReturn<T>, String> {
-        let (ack_tx, ack_rx) = mpsc::channel();
+        let (ack_tx, ack_rx) = kanal::unbounded();
         let req = ReadRequest::new(self.info, ack_tx);
         self.rreq_queue_tx
             .send(req)
@@ -239,10 +240,10 @@ pub struct RepCXL<T> {
     pub config: RepCXLConfig,
     num_of_objects: usize,
     view: GroupView,
-    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
-    wreq_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
-    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
-    rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
+    wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
+    wreq_queue_rx: Option<kanal::Receiver<WriteRequest<T>>>,
+    rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
+    rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
     stop_flag: Arc<AtomicBool>,
     logger: Option<utils::ms_logger::MonsterStateLogger>,
 }
@@ -274,8 +275,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         // }
 
         // init read and write request queues
-        let (wtx, wrx) = mpsc::channel();
-        let (rtx, rrx) = mpsc::channel();
+        let (wtx, wrx) = kanal::unbounded();
+        let (rtx, rrx) = kanal::unbounded();
 
         RepCXL {
             config,

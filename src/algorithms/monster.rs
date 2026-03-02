@@ -74,7 +74,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     start_time: SystemTime,
     round_time: Duration,
-    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
+    req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
     mut logger_opt: Option<ms_logger::MonsterStateLogger>,
 ) {
@@ -119,7 +119,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
         match monster_state {
             MonsterState::Try => {
                 match req_queue_rx.try_recv() {
-                    Ok(req) => {
+                    Ok(Some(req)) => {
                         wid = Wid::new(round_num, view.self_id);
                         oid = req.obj_info.id;
                         owcc.write(oid, round_num, view.self_id);
@@ -129,15 +129,21 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
                         
                     },
-                    Err(e) => match e {
-                        mpsc::TryRecvError::Empty => {
-                            // no request, stay in Try state
+                    Ok(None) => {
+                        // no request, stay in Try state
                             stats.empty_requests += 1;
-                        },
-                        mpsc::TryRecvError::Disconnected => {
+                    },
+                    Err(e) => match e {
+                        kanal::ReceiveError::Closed => {
                             // the repcxl instance keeps the original sender, 
                             // so this should occur when the instance is dropped
-                            monster_info!(monster_state, "request queue channel closed: {}", e);
+                            monster_info!(monster_state, "send request queue channel closed: {}", e);
+                            break;
+                        },
+                        kanal::ReceiveError::SendClosed => {
+                            // the repcxl instance keeps the original sender, 
+                            // so this should occur when the instance is dropped
+                            monster_info!(monster_state, "send request queue channel closed: {}", e);
                             break;
                         }
                     }
@@ -265,7 +271,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     _start_time: SystemTime,
     _round_time: Duration,
-    req_queue_rx: mpsc::Receiver<ReadRequest<T>>,
+    req_queue_rx: kanal::Receiver<ReadRequest<T>>,
     stop_flag: Arc<AtomicBool>,
 ) {
     
