@@ -1,0 +1,3 @@
+---
+- import_playbook: vms.deploy.yml
+- import_playbook: bench.ycsb.client.yml

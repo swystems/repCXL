@@ -7,3 +7,31 @@ YCSB workload
   unique keys: 1000
 
 INFO  [ycsb_client] This process is the coordinator. Executing YCSB load phase...
+INFO  [rep_cxl] Process 0 ready and waiting to start
+INFO  [rep_cxl] Rounds starting at SystemTime { tv_sec: 1772463544, tv_nsec: 911156791 }
+INFO  [ycsb_client] Executing YCSB run phase...
+INFO  [rep_cxl] Stopping repCXL process 0. Goodbye...
+INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=1, empty_requests=96
+YCSB run phase complete.
+  Total operations: 10000
+  Total time: 0.07s
+  Throughput: 134896.53 ops/sec
+  Read errors: 0
+  Write errors: 0
+  Safe reads: 5071
+  Dirty reads: 2
+  Read latencies
+    avg:	222ns
+    P50:	194ns (median)
+    P90:	341ns
+    P99:	498ns
+    P99.99:	7.00μs
+    P100:	7.00μs
+  Write latencies
+    avg:	14.50μs
+    P50:	14.62μs (median)
+    P90:	15.01μs
+    P99:	15.44μs
+    P99.99:	98.08μs
+    P100:	98.08μs
+INFO  [rep_cxl::algorithms::monster] [READ] Read request channel closed: receive from a closed channel

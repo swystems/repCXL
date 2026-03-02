@@ -10,8 +10,12 @@
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
 
+    # output stderr redirect to make ansible display the error message
     - name: run repCXL client coordinator
-      shell: scripts/run_ycsb_client.sh {{ vm_id }}  {{ ycsb_workload }} > bench_out.txt
+      shell: |
+        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} 2>&1) \
+          && echo "$output" | tee bench_out.txt \
+          || { echo "$output" >&2; exit 1; }
       args:
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
@@ -20,8 +24,12 @@
       async: true
       poll: 0
 
+    # output stderr redirect to make ansible display the error message
     - name: run repCXL client replica
-      shell: scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} > bench_out.txt
+      shell: |
+        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} 2>&1) \
+          && echo "$output" | tee bench_out.txt \
+          || { echo "$output" >&2; exit 1; }
       args:
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
