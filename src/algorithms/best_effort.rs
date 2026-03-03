@@ -4,7 +4,7 @@ use std::sync::Arc;
 use log::{info,error};
 use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
-use safe_memio::{mem_readall, mem_writeall, MemoryError};
+use safe_memio::{mem_readall, mem_writeall, mem_readends, MemoryError};
 
 use super::*;
 
@@ -50,7 +50,9 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     }
 }
 
-/// Return a value from one memory node at random ASAP
+/// Thread-reader: process read requests from repCXL object channels and sends
+/// ReadReturn. inter-thread communication might lead to overhead, prefer 
+/// _client version for better latency  
 pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     _start_time: SystemTime,
@@ -93,13 +95,14 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
     }
 }
 
-
+/// Client-reader: clients perform read operation directly i.e. no read thread
+/// processing requests
 pub fn async_best_effort_read_client<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     obj: &crate::RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
 
-    match mem_readall(obj.info.offset, &view.memory_nodes) {
+    match mem_readends(obj.info.offset, &view.memory_nodes) {
         Ok(states) => {
             // check if all states are consistent by VALUE since best effort does not use WID
 

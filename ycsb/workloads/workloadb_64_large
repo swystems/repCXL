@@ -1,4 +1,8 @@
-#   Default data size: 1 KB records (10 fields, 100 bytes each, plus key)
+# YCSB workload B
+#
+# smaller record count
+# larger number of operations
+# 64-bit size vals
 
 fieldcount=1
 fieldlength=63
@@ -9,10 +13,9 @@ workload=site.ycsb.workloads.CoreWorkload
 
 readallfields=true
 
-readproportion=0.5
-updateproportion=0.5
+readproportion=0.95
+updateproportion=0.05
 scanproportion=0
 insertproportion=0
 
 requestdistribution=zipfian
-

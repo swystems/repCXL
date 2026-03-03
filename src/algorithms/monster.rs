@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::Wid;
-use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
+use crate::safe_memio::{mem_writeall, mem_readall, mem_readends, MemoryError};
 use crate::utils::ms_logger;
 use crate::{ObjectMemoryEntry, ReadReturn};
 
@@ -315,13 +315,14 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
 }
 
 
-/// Same as monster_read but is called directly by the client
+/// Client-reader: clients perform read operation directly i.e. no read thread
+/// processing requests
 pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     obj: &crate::RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
 
-    match mem_readall(obj.info.offset, &view.memory_nodes) {
+    match mem_readends(obj.info.offset, &view.memory_nodes) {
         Ok(states) => {
             // check if all states are consistent (have the same wid (i.e. value))
             // and get the latest wid with one pass

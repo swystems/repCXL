@@ -1,0 +1,15 @@
+# local tests
+
+> # clients: 4
+> # mem nodes: 3
+> workload: workloada_64_large
+
+	
+		| tput	| read avg\99.99 | write avg\99.99 | dirty-reads | conflicts | sync failures | 
+----------------------------------------------------------------------------------------------------
+async best eff. | 822k	| 855ns\7.5us	 | 1.3us\10.7us	   | 0.035%	 | x         | x             |
+swarm (paper)   | 264k  | 2.7us\2.8us    | 3.1us\?         | 0           | ?         | x             |
+monster-1us	| 473k  | 852ns\9.1us	 | 3.1us\17us	   | 0.019% 	 | 0	     | 0.33%	     |	
+monster-2us	| 293k  | 852ns\15us	 | 5.7us\15us      | 0.01%       | 0         | 0.47%         |
+monster-4us	| 161k  | 854ns\9.1us    | 11.2us\46us     | 0.007%      | 0         | 0.6%          |
+monster-10us	| 66k   | 865ns\10us     | 28us\109us      | 0.001%      | 0         | 0.007%        |

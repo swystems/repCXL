@@ -75,13 +75,13 @@
         {
           echo "Date: ${ts}"
           echo ""
-          echo "########### RepCXL configuration ###########"
+          echo "============= RepCXL configuration ============="
           echo "File: {{ repcxl_config }}"
           cat "{{ repcxl_config }}"
-          echo "########### YCSB workload ###########"
+          echo "============= YCSB workload ============="
           echo "File: {{ ycsb_workload }}"
           cat "ycsb/workloads/{{ ycsb_workload }}"
-          echo "########### Benchmark Results ###########"
+          echo "============= Benchmark Results ============="
           echo ""
           cat "{{ local_result_folder }}"*.dat
         } > "${output_file}"
