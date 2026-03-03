@@ -16,7 +16,7 @@ if [ -z "$WORKLOAD" ]; then
     WORKLOAD=workloada_64
 fi
 
-# export RUST_LOG=info 
+export RUST_LOG=info 
 
 target/release/ycsb_client \
     ycsb/traces/${WORKLOAD}_load.dat \

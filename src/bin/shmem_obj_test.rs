@@ -31,7 +31,6 @@ fn main() {
     let msg = *b"Hello, RepCXL!";
     let _msg = 10; // convert to fixed-size array for simplicity
 
-    // we don't want to 
     ap.config.algorithm = "async_best_effort".to_string();
 
     let mut rcxl = RepCXL::new(ap.config);

@@ -1,12 +1,13 @@
 # vscode
 .vscode/
 
-# internal cluster config
-ansible/inv/sws.ini
-
 # rust files
 Cargo.lock
 target/
+
+# Benchmark work files
+*.dat
+bench_2*
 
 # other
 bpsleep
