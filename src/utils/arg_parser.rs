@@ -83,6 +83,13 @@ impl ArgParser {
                     .long("algorithm")
                     .help("Replication algorithm to use")
                     .value_parser(value_parser!(String)),
+            )
+            .arg(
+                Arg::new("read_retries")
+                    .short('R')
+                    .long("read-retries")
+                    .help("Number of times to retry a read operation")
+                    .value_parser(value_parser!(usize)),
             );
 
         for extra_arg in &self.extra_args {
@@ -118,6 +125,9 @@ impl ArgParser {
         }
         if let Some(processes) = matches.remove_one::<u32>("processes") {
             self.config.processes = Vec::from_iter(0..processes);
+        }
+        if let Some(read_retries) = matches.remove_one::<usize>("read_retries") {
+            self.config.read_retries = read_retries;
         }
 
         // validate config values

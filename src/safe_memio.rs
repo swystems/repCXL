@@ -19,11 +19,11 @@ const FAILURE_PROBABILITY: f32 = 0.0;
 pub struct MemoryError(pub usize);
 
 pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
-    let mut rng = rand::rng();
-    let roll: f32 = rng.random(); // random float between 0.0 and 1.0
-    if roll < FAILURE_PROBABILITY {
-        return Err("Simulated write failure");
-    }
+    // let mut rng = rand::rng();
+    // let roll: f32 = rng.random(); // random float between 0.0 and 1.0
+    // if roll < FAILURE_PROBABILITY {
+    //     return Err("Simulated write failure");
+    // }
 
     unsafe {
         std::ptr::write(addr, data);

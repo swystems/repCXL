@@ -6,6 +6,7 @@ default-run = "rep_bench"
 
 [dependencies]
 clap = { version = "4.5.44", features = ["string"] }
+core_affinity = "0.8.3"
 kanal = "0.1.1"
 libc = "0.2.175"
 log = "0.4.27"

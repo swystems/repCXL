@@ -314,15 +314,31 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
     }
 
-
+    /// Use the config-specified read algorithm to read an object. 
+    /// Retries the operation up to `config.read_retries` times if it returns a
+    /// dirty read.
     pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        algorithms::get_read_algorithm_client(
+        let mut res = algorithms::get_read_algorithm_client(
             &self.config.algorithm,
             self.view.clone(), 
-            obj)
+            obj);
+
+        for _ in 0..self.config.read_retries {
+            match res {
+                Ok(ReadReturn::ReadDirty(_)) => {
+                 res = algorithms::get_read_algorithm_client(
+                            &self.config.algorithm,
+                            self.view.clone(), 
+                            obj);   
+                }
+                _ => break,
+                }
+            
+        }
+
+        res
+        
     }
-
-
 
     /// Enable state logging to a file. Clears any existing log at the path.
     /// The algorithm thread will append state transitions to this file.
@@ -503,23 +519,25 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
 
         // WRITE thread
-            {
-                let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
-                let logger = self.logger.take();
-                let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
-                std::thread::spawn(move || {
-                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
-                });
-            }
+        {
+            core_affinity::set_for_current(core_affinity::CoreId { id: 1 });
+            let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
+            let logger = self.logger.take();
+            let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+            std::thread::spawn(move || {
+                algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
+            });
+        }
 
-            // READ thread
-            {
-                let stop = self.stop_flag.clone();
-                let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
-                std::thread::spawn(move || {
-                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
-                });
-            }
+        // READ thread
+        // {
+        //     // no thread pin for read as it is unused rn
+        //     let stop = self.stop_flag.clone();
+        //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
+        //     std::thread::spawn(move || {
+        //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
+        //     });
+        // }
 
     }
 
@@ -574,18 +592,20 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 let logger = self.logger.take();
                 let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
                 std::thread::spawn(move || {
+                    core_affinity::set_for_current(core_affinity::CoreId { id: 1 });
                     algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
                 });
             }
 
             // READ thread
-            {
-                let stop = self.stop_flag.clone();
-                let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
-                std::thread::spawn(move || {
-                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
-                });
-            }
+            // {
+            //     let stop = self.stop_flag.clone();
+            //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
+            //     std::thread::spawn(move || {
+            //         // no thread pin for read as it is unused rn
+            //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
+            //     });
+            // }
 
             // block until after start time
             // std::thread::sleep(Duration::from_secs(2));
