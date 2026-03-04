@@ -1,8 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use libc::sched_yield;
-
 use super::*;
 use crate::Wid;
 use crate::safe_memio::{mem_writeall, mem_readall, mem_readends, MemoryError};
@@ -195,7 +193,8 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                 let req = pending_req.as_ref().unwrap();
                 let ome = ObjectMemoryEntry::new(wid, req.data);
 
-                // nanosecond timestamp
+
+                // strange idea to reduce conflict 
                 // let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
                 // let first_byte_of_req_data = unsafe { std::ptr::read((&raw const req.data) as *const u8) };
                 // if ts % 4 != first_byte_of_req_data as u128 % 4 {

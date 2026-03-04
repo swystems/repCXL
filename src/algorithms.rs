@@ -34,6 +34,9 @@ pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     }
 }
 
+/// Get the read algorithm thread function.
+/// Currently disabled.
+#[allow(dead_code)]
 pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: String,
 ) -> fn(

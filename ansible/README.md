@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- ansible 
+- ansible (tested with 2.20)
 
 ```sh
 pipx install ansible ansible-core
@@ -10,9 +10,14 @@ pipx ensurepath
 # some required collections
 ansible-galaxy collection install ansible.posix
 ```
+- QEMU
 
-- 16GB memory (change the parameters in `cxl_vm.sh` otherwise)
-- CXL memory mapped as numa node
+For each VM (parameters can be changed in `cxl_vm.sh`)
+
+- 20GB disk space
+- 4 cores
+- 8GB local memory
+- 8GB CXL memory mapped as numa node
 
 
 ## howto
@@ -20,7 +25,7 @@ ansible-galaxy collection install ansible.posix
 ### Create a VM in localhost with ubuntu 24.04 and CXL memory mapped to NUMA node 0. 
 
     cd ansible 
-    ansible-playbook -i inv/local.yml play/vm.create.yml -K -e vm_id=0
+    ansible-playbook -i inv/local.yml vm.create.yml -K -e vm_id=0
 
 and enter sudo password.
 
@@ -30,7 +35,7 @@ The VM starts in the background and its disk is created in `$HOME/repCXL-ansible
 
 Change `vm_id`
 
-    ansible-playbook -i inv/local.ini play/vm.create.yml -K -e vm_id=1
+    ansible-playbook -i inv/local.ini vm.create.yml -K -e vm_id=1
 
 ### Force the re-creation of a VM
 Make sure all VMs are stopped and add `-e force=true`
@@ -41,20 +46,20 @@ pkill qemu # on the host machine
 
 ```sh
 # locally
-ansible-playbook -i inv/local.ini play/vm.create.yml -K -e vm_id=1 -e force=true
+ansible-playbook -i inv/local.ini vm.create.yml -K -e vm_id=1 -e force=true
 ```
 
 ### Provision all VMs
 
 Edit inventory with the ports and hostnames of the running VMs then
 
-    ansible-playbook -i inv/local.ini play/vms.provision.yml -K
+    ansible-playbook -i inv/local.ini provision.yml -K
 
 ### Clone and test this repo on all VMs
 
 Edit inventory with the ports and hostnames of the running VMs then
 
-    ansible-playbook -i inv/local.ini play/vms.deploy.yml -K
+    ansible-playbook -i inv/local.ini deploy.yml -K
 
 ### SSH
 
@@ -80,7 +85,7 @@ Restart VMs (no need to run ansible again)
 Create another ansible inventory in `inv/remote.ini` with for remote servers info instead
 of localhost (requires passwordless SSH access). Run
 
-    ansible-playbook -i inv/remote.ini play/vm.create.yml -K -e vm_id=0
+    ansible-playbook -i inv/remote.ini vm.create.yml -K -e vm_id=0
 
 ### Find PCI devices mapped to shared (possibly CXL) memory from a VM
 

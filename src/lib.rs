@@ -591,8 +591,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
                 let logger = self.logger.take();
                 let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+                let core_affinity = self.config.core_affinity;
                 std::thread::spawn(move || {
-                    core_affinity::set_for_current(core_affinity::CoreId { id: 1 });
+                    if let Some(core) = core_affinity {
+                         core_affinity::set_for_current(core_affinity::CoreId { id: core });
+                    }
                     algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
                 });
             }
