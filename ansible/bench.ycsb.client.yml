@@ -3,6 +3,13 @@
   gather_facts: no
   tasks: 
 
+    - name: generate repCXL config file from template locally
+      delegate_to: localhost
+      run_once: true
+      template:
+        src: config.template.j2
+        dest: "{{ local_repo }}/config/config-ansible.toml"
+
     - name: synchronize the content of this repo to remote hosts
       synchronize:
         src: "{{ local_repo }}"
@@ -22,6 +29,7 @@
       args: 
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
+
 
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client coordinator
