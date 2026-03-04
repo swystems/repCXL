@@ -1,11 +1,15 @@
+use core::sync;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use log::info;
 
 use super::*;
 use crate::Wid;
 use crate::safe_memio::{mem_writeall, mem_readall, mem_readends, MemoryError};
 use crate::utils::ms_logger;
 use crate::{ObjectMemoryEntry, ReadReturn};
+
 
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -31,13 +35,27 @@ impl std::fmt::Display for MonsterState {
     } 
 }
 
+/// logging macro with phase tag
+macro_rules! monster_info {
+    ($tag:expr, $($arg:tt)*) => {
+        log::debug!("[{} phase] {}", $tag, format_args!($($arg)*));
+    };
+}
+/// logging macro with phase tag
+macro_rules! monster_error {
+    ($tag:expr, $($arg:tt)*) => {
+        log::error!("[{}] {}", $tag, format_args!($($arg)*));
+    };
+}
+
+/// Collect statistics for MONSTER algorithm
 struct MonsterStats {
     conflicts: u64,
     sync_failures: u64,
     empty_requests: u64,
     prev_round: u64,
+    rewrites: u64,
 }
-
 impl MonsterStats {
     fn new() -> Self {
         Self {
@@ -45,30 +63,27 @@ impl MonsterStats {
             sync_failures: 0,
             empty_requests: 0,
             prev_round: 1,
+            rewrites: 0,
         }
     }
 
-    fn check_sync_failure(&mut self, round_num: u64) {
-        if round_num > self.prev_round + 1 {
+    /// update the sync failure count if MONSTER skipped a round.
+    /// 
+    /// returns true if there is a sync failure, false otherwise
+    fn update_sync_failure(&mut self, round_num: u64) -> bool{
+        let sync_failure     = round_num > self.prev_round + 1;
+        if sync_failure {
             self.sync_failures += 1;
         }
         self.prev_round = round_num;
+        sync_failure
     }
 }
 
-// 
-// logging macro with phase tag
-macro_rules! monster_info {
-    ($tag:expr, $($arg:tt)*) => {
-        log::debug!("[{} phase] {}", $tag, format_args!($($arg)*));
-    };
+fn is_overtime(round_start: SystemTime, round_time: Duration) -> bool {
+    SystemTime::now().duration_since(round_start).unwrap() > round_time
 }
 
-macro_rules! monster_error {
-    ($tag:expr, $($arg:tt)*) => {
-        log::error!("[{}] {}", $tag, format_args!($($arg)*));
-    };
-}
 
 pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
@@ -99,7 +114,11 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     loop {
         if stop_flag.load(Ordering::Relaxed) {
             monster_info!(monster_state, "Stop flag is set, exiting");
-            log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}", stats.conflicts, stats.sync_failures, stats.empty_requests);
+            log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, rewrites={}", 
+                stats.conflicts, 
+                stats.sync_failures, 
+                stats.empty_requests, 
+                stats.rewrites);
             break;
         }
 
@@ -109,7 +128,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             oid
         );
 
-        stats.check_sync_failure(round_num);
+        let _ = stats.update_sync_failure(round_num);
 
         // Log state transition if logging is enabled
         if let Some(ref mut logger) = logger_opt {
@@ -203,20 +222,30 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                 //     }
                 // }
 
-                match mem_writeall(req.obj_info.offset, ome, &view.memory_nodes) {
-                    Ok(()) => {
-                        // send ack to client
-                        if let Err(_) = req.ack_tx.send(true) {
-                            error!("Failed to send ack");
+                for _ in 0..2 { // retry replication a few times if it fails, to handle transient failures
+                    match mem_writeall(req.obj_info.offset, ome, &view.memory_nodes) {
+                        Ok(()) => {
+                            // send ack to client
+                            if let Err(_) = req.ack_tx.send(true) {
+                                error!("Failed to send ack");
+                            }
+                            monster_state = MonsterState::Try;
+                        },
+                        Err(MemoryError(memory_node_id)) => {
+                            error!("Memory node {} failed during write replication", memory_node_id);
+                            break;
                         }
-                        pending_req = None;
-                        monster_state = MonsterState::Try;
-                    },
-                    Err(MemoryError(memory_node_id)) => {
-                        error!("Memory node {} failed during write replication", memory_node_id);
-                        break;
+                    }
+
+                    if !stats.update_sync_failure(round_num + 1) {
+                        break; // replication succeeded within the round, break out of retry loop
+                    } 
+                    else {
+                        stats.rewrites += 1;
                     }
                 }
+                pending_req = None;
+
             },
 
             // wait for the replicate phase of the conflicting process to finish
@@ -284,6 +313,8 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
     req_queue_rx: kanal::Receiver<ReadRequest<T>>,
     stop_flag: Arc<AtomicBool>,
 ) {
+
+    let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
     
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -304,6 +335,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
                         let result = if consistent {
                             ReadReturn::ReadSafe(latest.value)
                         } else {
+                            dirty_reads.push(states.iter().map(|s| s.wid).collect());
                             ReadReturn::ReadDirty(latest.value)
                         };
                         if let Err(e) = req.ack_tx.send(result) {
@@ -332,6 +364,8 @@ pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
     obj: &crate::RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
 
+    // let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
+
     match mem_readends(obj.info.offset, &view.memory_nodes) {
         Ok(states) => {
             // check if all states are consistent (have the same wid (i.e. value))
@@ -345,6 +379,12 @@ pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
             let result = if consistent {
                 ReadReturn::ReadSafe(latest.value)
             } else {
+                if states[0].wid.round_num > states[1].wid.round_num {
+                    debug!("Dirty reads new-old");
+                }
+                else {
+                    debug!("Dirty reads old-new");
+                }
                 ReadReturn::ReadDirty(latest.value)
             };
             Ok(result)
