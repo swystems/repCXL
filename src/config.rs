@@ -13,6 +13,8 @@ const DEFAULT_STARTUP_DELAY: u64 = 1000000000; // 1s
 const DEFAULT_ROUND_TIME_NS: u64 = 100000; //1ms
 const DEFAULT_PROCESSES: &[u32] = &[0]; // default to single process with ID 0
 const DEFAULT_ALGORITHM: &str = "monster";
+const DEFAULT_READ_RETRIES: usize = 0;
+const DEFAULT_CORE_AFFINITY: Option<usize> = None;
 
 
 
@@ -83,6 +85,8 @@ pub struct RepCXLConfig {
     #[serde(deserialize_with = "parse_processes")]
     pub processes: Vec<u32>,
     pub algorithm: String,
+    pub read_retries: usize,
+    pub core_affinity: Option<usize>,
 }
 
 impl Default for RepCXLConfig {
@@ -96,6 +100,8 @@ impl Default for RepCXLConfig {
             id: -1, // -1 indicates no id provided in config file
             processes: DEFAULT_PROCESSES.to_vec(), // default to single process with ID 0
             algorithm: DEFAULT_ALGORITHM.to_string(),
+            read_retries: DEFAULT_READ_RETRIES,
+            core_affinity: DEFAULT_CORE_AFFINITY,
         }
     }
 }
@@ -135,6 +141,13 @@ impl RepCXLConfig {
         // must specify at least one node
         if self.mem_nodes.is_empty() {
             return Err(format!("{} at least one memory node must be specified in the config", err_prefix));
+        }
+
+        // core affinity should not use core 0 (reserved for system tasks)
+        if let Some(core) = self.core_affinity {
+            if core == 0 {
+                return Err(format!("{} Avoid using core 0", err_prefix));
+            }
         }
 
         Ok(())

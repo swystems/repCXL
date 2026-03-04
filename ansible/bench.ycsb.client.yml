@@ -1,0 +1,93 @@
+- name: Run YCSB cliient benchmark
+  hosts: vms
+  gather_facts: no
+  tasks: 
+
+    - name: synchronize the content of this repo to remote hosts
+      synchronize:
+        src: "{{ local_repo }}"
+        dest: "{{ remote_dir }}"
+        rsync_opts:
+          - "--exclude=.git/"
+          - "--exclude=target/"
+          - "--exclude=jupyter/"
+          - "--exclude=test/"
+          - "--exclude=ansible/"
+          - "--exclude=ycsb/"
+
+    - name: build repCXL client
+      shell: |
+        source $HOME/.cargo/env
+        cargo build --release --bin ycsb_client
+      args: 
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+
+    # output stderr redirect to make ansible display the error message
+    - name: run repCXL client coordinator
+      shell: |
+        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
+          && echo "$output" | tee bench_out.dat \
+          || { echo "$output" >&2; exit 1; }
+      args:
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+      become: true
+      when: repcxl_coordinator_id == vm_id
+      async: true
+      poll: 0
+
+    # output stderr redirect to make ansible display the error message
+    - name: run repCXL client replica
+      shell: |
+        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
+          && echo "$output" | tee bench_out.dat \
+          || { echo "$output" >&2; exit 1; }
+      args:
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+      become: true
+      when: repcxl_coordinator_id != vm_id
+
+    - name: ensure local output directory exists
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: "{{ local_result_folder }}"
+        state: directory
+        mode: '0755'
+
+    - name: fetch bench_out.dat from remote hosts
+      fetch:
+        src: "{{ remote_dir }}/bench_out.dat"
+        dest: "{{ local_result_folder }}/{{ inventory_hostname }}.dat"
+        flat: yes
+
+    - name: aggregate remote outputs to single local file
+      delegate_to: localhost
+      run_once: true
+      shell: |
+        set -euo pipefail
+        ts=$(date +"%Y%m%d_%H%M")
+        output_file="{{ local_result_folder }}/bench_${ts}.txt"
+        latest_file="{{ local_result_folder }}/bench_latest.txt"
+
+        {
+          echo "Date: ${ts}"
+          echo ""
+          echo "============= RepCXL configuration ============="
+          echo "File: {{ repcxl_config }}"
+          cat "{{ repcxl_config }}"
+          echo "============= YCSB workload ============="
+          echo "File: {{ ycsb_workload }}"
+          cat "ycsb/workloads/{{ ycsb_workload }}"
+          echo "============= Benchmark Results ============="
+          echo ""
+          cat "{{ local_result_folder }}"*.dat
+        } > "${output_file}"
+
+        cp -f "${output_file}" "${latest_file}"
+      args:
+        executable: /bin/bash
+        chdir: "{{ local_repo }}"
+

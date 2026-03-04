@@ -83,7 +83,22 @@ impl ArgParser {
                     .long("algorithm")
                     .help("Replication algorithm to use")
                     .value_parser(value_parser!(String)),
+            )
+            .arg(
+                Arg::new("read_retries")
+                    .short('R')
+                    .long("read-retries")
+                    .help("Number of times to retry a read operation")
+                    .value_parser(value_parser!(usize)),
+            )
+            .arg(
+                Arg::new("core_affinity")
+                    .short('C')
+                    .long("core-affinity")
+                    .help("CPU core to pin the repCXL write thread to")
+                    .value_parser(value_parser!(usize)),
             );
+
 
         for extra_arg in &self.extra_args {
             cmd = cmd.arg(extra_arg.clone());
@@ -118,6 +133,12 @@ impl ArgParser {
         }
         if let Some(processes) = matches.remove_one::<u32>("processes") {
             self.config.processes = Vec::from_iter(0..processes);
+        }
+        if let Some(read_retries) = matches.remove_one::<usize>("read_retries") {
+            self.config.read_retries = read_retries;
+        }
+        if let Some(core_affinity) = matches.remove_one::<usize>("core_affinity") {
+            self.config.core_affinity = Some(core_affinity);
         }
 
         // validate config values

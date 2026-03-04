@@ -23,3 +23,10 @@ run yscb bench
 
     bin/ycsb load redis -P workloads/workloada -p "redis.host=127.0.0.1" -p "redis.port=6379
     bin/ycsb run redis -P workloads/workloada -p "redis.host=127.0.0.1" -p "redis.port=6379
+
+### generate YCSB workload for the repCXL client
+
+From the repo home
+
+    bench/gen_ycsb_workload.sh <path_to_ycsb_dir>
+    

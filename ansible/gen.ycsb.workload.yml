@@ -1,0 +1,26 @@
+- name: Run YCSB cliient benchmark
+  hosts: vms
+  gather_facts: no
+  tasks:
+
+    - name: create remote work directory if it doesn't exist
+      file:
+        path: "{{ remote_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: synchronize YCSB
+      synchronize:
+        src: "{{ local_repo }}/ycsb"
+        dest: "{{ remote_dir }}/"
+    
+    - name: generate workload file for YCSB client
+      shell: |
+        bin/ycsb load basic -P {{ remote_abs }}/ycsb/workloads/{{ ycsb_workload }} > {{ remote_abs }}/ycsb/traces/{{ ycsb_workload }}_load.dat
+        bin/ycsb run basic -P {{ remote_abs }}/ycsb/workloads/{{ ycsb_workload }} > {{ remote_abs }}/ycsb/traces/{{ ycsb_workload }}_run.dat
+      vars:
+        remote_abs: "/home/{{ansible_user}}/{{ remote_dir }}"
+      args:
+        executable: /bin/bash
+        chdir: "{{ ycsb_remote_source_dir }}"
+

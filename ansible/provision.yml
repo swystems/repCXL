@@ -1,0 +1,57 @@
+---
+- name: Provision QEMU CXL VM
+  hosts: vms
+  tasks:
+    
+    - name: Install utils
+      package:
+        name: 
+        - curl
+        - build-essential
+        - htop
+        state: present
+      become: yes
+    
+    - name: Install rust
+      shell: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+      args:
+        executable: /bin/bash
+      register: rust_install
+
+    - name: Show rust install output
+      debug:
+        var: rust_install
+
+    - name: Verify rust installation
+      shell: /home/{{ ansible_user }}/.cargo/bin/rustc --version
+      register: rustc_version
+      changed_when: false
+
+    - name: Show rustc version
+      debug:
+        var: rustc_version.stdout
+    
+    - name: Install redis
+      package:
+        name: redis
+        state: present
+      become: yes
+
+    - name: install Java and Maven
+      package:
+        name:
+        - default-jdk
+        - maven
+        - python-is-python3
+        state: present
+      become: yes
+
+    - name: clone YCSB
+      git:
+        repo: "https://github.com/brianfrankcooper/YCSB.git"
+        dest: "{{ ycsb_remote_source_dir }}"
+    
+    - name: build YCSB core and Redis binding
+      shell: mvn -B -pl site.ycsb:core,site.ycsb:redis-binding -am package -DskipTests
+      args:
+        chdir: "{{ ycsb_remote_source_dir }}"

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::Wid;
-use crate::safe_memio::{mem_writeall, mem_readall, MemoryError};
+use crate::safe_memio::{mem_writeall, mem_readall, mem_readends, MemoryError};
 use crate::utils::ms_logger;
 use crate::{ObjectMemoryEntry, ReadReturn};
 
@@ -74,7 +74,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     start_time: SystemTime,
     round_time: Duration,
-    req_queue_rx: mpsc::Receiver<WriteRequest<T>>,
+    req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
     mut logger_opt: Option<ms_logger::MonsterStateLogger>,
 ) {
@@ -119,7 +119,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
         match monster_state {
             MonsterState::Try => {
                 match req_queue_rx.try_recv() {
-                    Ok(req) => {
+                    Ok(Some(req)) => {
                         wid = Wid::new(round_num, view.self_id);
                         oid = req.obj_info.id;
                         owcc.write(oid, round_num, view.self_id);
@@ -129,15 +129,21 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
                         
                     },
-                    Err(e) => match e {
-                        mpsc::TryRecvError::Empty => {
-                            // no request, stay in Try state
+                    Ok(None) => {
+                        // no request, stay in Try state
                             stats.empty_requests += 1;
-                        },
-                        mpsc::TryRecvError::Disconnected => {
+                    },
+                    Err(e) => match e {
+                        kanal::ReceiveError::Closed => {
                             // the repcxl instance keeps the original sender, 
                             // so this should occur when the instance is dropped
-                            monster_info!(monster_state, "request queue channel closed: {}", e);
+                            monster_info!(monster_state, "send request queue channel closed: {}", e);
+                            break;
+                        },
+                        kanal::ReceiveError::SendClosed => {
+                            // the repcxl instance keeps the original sender, 
+                            // so this should occur when the instance is dropped
+                            monster_info!(monster_state, "send request queue channel closed: {}", e);
                             break;
                         }
                     }
@@ -186,7 +192,17 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                 
                 let req = pending_req.as_ref().unwrap();
                 let ome = ObjectMemoryEntry::new(wid, req.data);
-                
+
+
+                // strange idea to reduce conflict 
+                // let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+                // let first_byte_of_req_data = unsafe { std::ptr::read((&raw const req.data) as *const u8) };
+                // if ts % 4 != first_byte_of_req_data as u128 % 4 {
+                //     unsafe {
+                //     sched_yield();   
+                //     }
+                // }
+
                 match mem_writeall(req.obj_info.offset, ome, &view.memory_nodes) {
                     Ok(()) => {
                         // send ack to client
@@ -265,7 +281,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
     _start_time: SystemTime,
     _round_time: Duration,
-    req_queue_rx: mpsc::Receiver<ReadRequest<T>>,
+    req_queue_rx: kanal::Receiver<ReadRequest<T>>,
     stop_flag: Arc<AtomicBool>,
 ) {
     
@@ -306,4 +322,35 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
         }
     }
 
+}
+
+
+/// Client-reader: clients perform read operation directly i.e. no read thread
+/// processing requests
+pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
+    view: crate::GroupView,
+    obj: &crate::RepCXLObject<T>,
+) -> Result<ReadReturn<T>, String> {
+
+    match mem_readends(obj.info.offset, &view.memory_nodes) {
+        Ok(states) => {
+            // check if all states are consistent (have the same wid (i.e. value))
+            // and get the latest wid with one pass
+            // println!("{:?}", states);
+            let (consistent, latest) = states.iter().skip(1).fold(
+                (true, &states[0]),
+                |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
+            );
+            // return based on consistency
+            let result = if consistent {
+                ReadReturn::ReadSafe(latest.value)
+            } else {
+                ReadReturn::ReadDirty(latest.value)
+            };
+            Ok(result)
+        },
+        Err(MemoryError(memory_node_id)) => {
+            Err(format!("Memory node {} failed during read", memory_node_id))
+        }
+    }
 }

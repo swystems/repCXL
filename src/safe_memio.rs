@@ -13,17 +13,17 @@ use crate::ObjectMemoryEntry;
 use crate::shmem::MemoryNode;
 use log::error;
 
-const FAILURE_PROBABILITY: f32 = 0.0; // 1% chance of failure
+const FAILURE_PROBABILITY: f32 = 0.0;
 
 #[derive(Debug)]
 pub struct MemoryError(pub usize);
 
 pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
-    let mut rng = rand::rng();
-    let roll: f32 = rng.random(); // random float between 0.0 and 1.0
-    if roll < FAILURE_PROBABILITY {
-        return Err("Simulated write failure");
-    }
+    // let mut rng = rand::rng();
+    // let roll: f32 = rng.random(); // random float between 0.0 and 1.0
+    // if roll < FAILURE_PROBABILITY {
+    //     return Err("Simulated write failure");
+    // }
 
     unsafe {
         std::ptr::write(addr, data);
@@ -42,7 +42,7 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
 }
 
 /// Read the value from all memory nodes for the given object
-pub fn mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
+pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
 
     let node = mem_nodes.choose(&mut rand::rng()).unwrap();  // Returns Option<&T>
 
@@ -96,3 +96,41 @@ pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resul
     }
     Ok(states)
 }
+
+
+/// Read the value from the first and last memory nodes only, exploiting the
+/// fact that memory nodes are written to always in the same order. Used for
+/// scalability improvements
+pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
+    let mut states = Vec::new();
+    
+    // read the first node
+    let first_node = &mem_nodes[0];
+    let addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    match safe_read(addr) {
+        Ok(data) => states.push(data),
+        Err(e) => {
+            error!(
+                "Safe read failed. Node {}, offset {}: {}",
+                first_node.id, offset, e
+            );
+            return Err(MemoryError(first_node.id));
+        }
+    }
+    
+    // read the last node
+    let last_node = &mem_nodes[mem_nodes.len() - 1];
+    let addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    match safe_read(addr) {
+        Ok(data) => states.push(data),
+        Err(e) => {
+            error!(
+                "Safe read failed. Node {}, offset {}: {}",
+                last_node.id, offset, e
+            );
+            return Err(MemoryError(last_node.id));
+        }
+    }
+    Ok(states)
+}
+

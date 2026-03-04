@@ -1,0 +1,114 @@
+---
+- name: Create QEMU CXL VM
+  hosts: servers
+  tasks:
+    - name: create work directory
+      file:
+        path: "{{ host_vm_files_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: debug variables
+      debug:
+        msg:
+        - "host_vm_files_dir={{ host_vm_files_dir }}"
+        - "image_path={{ image_path }}"
+        - "vm_disk_path={{ vm_disk_path }}"
+    
+    - name: check if vm disk already exists
+      stat:
+        path: "{{ vm_disk_path }}"
+      register: vm_disk_stat
+    
+    - name: skip vm creation if disk already exists
+      debug:
+        msg: "VM with id {{ vm_id }} exists, consider passing -e vm_id=<id>"
+      when: vm_disk_stat.stat.exists
+
+    - name: delete existing disk if force provided
+      file:
+        path: "{{ vm_disk_path }}"
+        state: absent
+      when: force | bool and vm_disk_stat.stat.exists
+
+    - name: end host if vm disk already exists
+      meta: end_host
+      when: vm_disk_stat.stat.exists and not force | bool
+    
+    - name: Update package manager cache
+      package:
+        update_cache: yes
+      become: yes
+      
+    - name: Install cloud-init
+      package:
+        name: 
+        - cloud-image-utils
+        - qemu-system
+        state: present
+      become: yes
+      
+    - name: Download Ubuntu 24.04 image
+      get_url:
+        url: "{{ image_url }}"
+        dest: "{{ image_path }}"
+        mode: '0644'
+    
+    - name: Verify image download
+      stat:
+        path: "{{ image_path }}"
+      register: image_stat
+  
+    - name: debug variables
+      debug:
+        msg:
+        - "host_vm_files_dir={{ host_vm_files_dir }}"
+        - "image_path={{ image_path }}"
+        - "vm_disk_path={{ vm_disk_path }}"
+     
+
+    - name: create vm disk from base image
+      shell: qemu-img create -f qcow2 -F qcow2 -b {{ abs_image_path }} {{ vm_disk_path }} 20G
+      args:
+        executable: /bin/bash
+      vars:
+        abs_image_path: /home/{{ ansible_facts['user_id'] }}/{{ image_path }}
+   
+    - name: create ansible ssh key
+      command: ssh-keygen -t ed25519 -f ~/.ssh/ansible_key -N ""
+      args:
+        creates: ~/.ssh/ansible_key
+      delegate_to: localhost
+      run_once: true
+
+    - name: read ansible public key
+      slurp:
+        src: ~/.ssh/ansible_key.pub
+      register: ssh_ansible_key_file
+      delegate_to: localhost
+
+    - name: set ssh_ansible_key fact
+      set_fact:
+        ssh_ansible_key: "{{ ssh_ansible_key_file.content | b64decode | trim }}"
+    
+    - name: copy templates
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ host_vm_files_dir }}/{{ item.dest }}"
+        mode: '0744'
+      loop:
+        - { src: cloud-init/meta_data.j2, dest: meta_data.yaml }
+        - { src: cloud-init/user_data.j2, dest: user_data.yaml }
+        - { src: qemu_cxl.sh, dest: qemu_cxl.sh }
+    - name: create cloud-init seed iso
+      command: >
+        cloud-localds {{ host_vm_files_dir }}/seed{{ vm_id }}.iso {{ host_vm_files_dir }}/user_data.yaml {{ host_vm_files_dir }}/meta_data.yaml
+
+    - name: create vm with QEMU and cloud-init
+      command: >
+        ./qemu_cxl.sh {{ vm_id }} {{ cxl_numa_node }} {{ memory_nodes }}
+      args:
+        chdir: "{{ host_vm_files_dir }}"
+      environment:
+        FIRST_BOOT: "1"
+      become: yes

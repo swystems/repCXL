@@ -5,6 +5,10 @@
 Cargo.lock
 target/
 
+# Benchmark work files
+*.dat
+bench_2*
+
 # other
 bpsleep
 .env
@@ -17,6 +21,5 @@ bpsleep
 *.iso
 ibmvm.sh
 
-# Added by cargo
-
-/target
+# local deployment files
+repCXL-ansible/

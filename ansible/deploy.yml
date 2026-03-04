@@ -1,0 +1,14 @@
+---
+- name: Deploy repCXL from GitHub
+  hosts: vms
+  tasks:
+    - name: synchronize the content of this repo to remote hosts
+      synchronize:
+        src: "{{ local_repo }}"
+        dest: "{{ remote_dir }}"
+        rsync_opts:
+          - "--exclude=.git/"
+          - "--exclude=target/"
+          - "--exclude=jupyter/"
+          - "--exclude=test/"
+          - "--exclude=ansible/"

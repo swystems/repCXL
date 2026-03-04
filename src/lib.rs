@@ -5,7 +5,7 @@ use log::{debug, error, info, warn};
 
 use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
 mod algorithms;
@@ -76,11 +76,11 @@ impl PartialEq for GroupView {
 pub struct WriteRequest<T> {
     pub(crate) obj_info: ObjectInfo,
     pub data: T,
-    pub ack_tx: mpsc::Sender<bool>,
+    pub ack_tx: kanal::Sender<bool>,
 }
 
 impl<T> WriteRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: mpsc::Sender<bool>) -> Self {
+    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: kanal::Sender<bool>) -> Self {
         WriteRequest {
             obj_info,
             data,
@@ -88,18 +88,18 @@ impl<T> WriteRequest<T> {
         }
     }
 
-    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, mpsc::Sender<bool>) {
+    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, kanal::Sender<bool>) {
         (self.obj_info, self.data, self.ack_tx)
     }
 }
 
 pub struct ReadRequest<T> {
     pub(crate) obj_info: ObjectInfo,
-    pub ack_tx: mpsc::Sender<ReadReturn<T>>,
+    pub ack_tx: kanal::Sender<ReadReturn<T>>,
 }
 
 impl<T> ReadRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: mpsc::Sender<ReadReturn<T>>) -> Self {
+    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: kanal::Sender<ReadReturn<T>>) -> Self {
         ReadRequest { obj_info, ack_tx }
     }
 }
@@ -112,8 +112,8 @@ pub enum ReadReturn<T> {
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T: Copy> {
-    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
-    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
+    wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
+    rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     info: ObjectInfo, // could also just store the offset
 }
 
@@ -122,8 +122,8 @@ impl<T: Copy> RepCXLObject<T> {
         id: usize,
         offset: usize,
         size: usize,
-        wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
-        rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
+        wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
+        rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     ) -> Self {
         RepCXLObject {
             wreq_queue_tx,
@@ -133,7 +133,7 @@ impl<T: Copy> RepCXLObject<T> {
     }
 
     pub fn write(&self, data: T) -> Result<(), String> {
-        let (ack_tx, ack_rx) = mpsc::channel();
+        let (ack_tx, ack_rx) = kanal::unbounded();
         let req = WriteRequest::new(self.info, data, ack_tx);
 
         self.wreq_queue_tx
@@ -149,7 +149,7 @@ impl<T: Copy> RepCXLObject<T> {
     }
 
     pub fn read(&self) -> Result<ReadReturn<T>, String> {
-        let (ack_tx, ack_rx) = mpsc::channel();
+        let (ack_tx, ack_rx) = kanal::unbounded();
         let req = ReadRequest::new(self.info, ack_tx);
         self.rreq_queue_tx
             .send(req)
@@ -239,10 +239,10 @@ pub struct RepCXL<T> {
     pub config: RepCXLConfig,
     num_of_objects: usize,
     view: GroupView,
-    wreq_queue_tx: mpsc::Sender<WriteRequest<T>>,
-    wreq_queue_rx: Option<mpsc::Receiver<WriteRequest<T>>>,
-    rreq_queue_tx: mpsc::Sender<ReadRequest<T>>,
-    rreq_queue_rx: Option<mpsc::Receiver<ReadRequest<T>>>,
+    wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
+    wreq_queue_rx: Option<kanal::Receiver<WriteRequest<T>>>,
+    rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
+    rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
     stop_flag: Arc<AtomicBool>,
     logger: Option<utils::ms_logger::MonsterStateLogger>,
 }
@@ -274,8 +274,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         // }
 
         // init read and write request queues
-        let (wtx, wrx) = mpsc::channel();
-        let (rtx, rrx) = mpsc::channel();
+        let (wtx, wrx) = kanal::unbounded();
+        let (rtx, rrx) = kanal::unbounded();
 
         RepCXL {
             config,
@@ -314,6 +314,31 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
     }
 
+    /// Use the config-specified read algorithm to read an object. 
+    /// Retries the operation up to `config.read_retries` times if it returns a
+    /// dirty read.
+    pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
+        let mut res = algorithms::get_read_algorithm_client(
+            &self.config.algorithm,
+            self.view.clone(), 
+            obj);
+
+        for _ in 0..self.config.read_retries {
+            match res {
+                Ok(ReadReturn::ReadDirty(_)) => {
+                 res = algorithms::get_read_algorithm_client(
+                            &self.config.algorithm,
+                            self.view.clone(), 
+                            obj);   
+                }
+                _ => break,
+                }
+            
+        }
+
+        res
+        
+    }
 
     /// Enable state logging to a file. Clears any existing log at the path.
     /// The algorithm thread will append state transitions to this file.
@@ -484,6 +509,38 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         None
     }
 
+    /// Start the repCXL protocol threads without synchronization. Use `sync_start` 
+    /// for sync protocols.
+    pub fn start(&mut self) {
+        let algorithm = self.config.algorithm.clone();
+        let rt = Duration::from_nanos(self.config.round_time);
+        let start_time = std::time::SystemTime::now();
+        let v = self.view.clone();
+
+
+        // WRITE thread
+        {
+            core_affinity::set_for_current(core_affinity::CoreId { id: 1 });
+            let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
+            let logger = self.logger.take();
+            let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+            std::thread::spawn(move || {
+                algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
+            });
+        }
+
+        // READ thread
+        // {
+        //     // no thread pin for read as it is unused rn
+        //     let stop = self.stop_flag.clone();
+        //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
+        //     std::thread::spawn(move || {
+        //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
+        //     });
+        // }
+
+    }
+
     /// Synchronize processes in the group and start repCXL rounds.
     /// **assumes sync'ed clocks**
     /// All processes must call this function with the same group view to
@@ -534,19 +591,24 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
                 let logger = self.logger.take();
                 let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+                let core_affinity = self.config.core_affinity;
                 std::thread::spawn(move || {
+                    if let Some(core) = core_affinity {
+                         core_affinity::set_for_current(core_affinity::CoreId { id: core });
+                    }
                     algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
                 });
             }
 
             // READ thread
-            {
-                let stop = self.stop_flag.clone();
-                let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
-                std::thread::spawn(move || {
-                    algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
-                });
-            }
+            // {
+            //     let stop = self.stop_flag.clone();
+            //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
+            //     std::thread::spawn(move || {
+            //         // no thread pin for read as it is unused rn
+            //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
+            //     });
+            // }
 
             // block until after start time
             // std::thread::sleep(Duration::from_secs(2));
