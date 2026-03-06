@@ -6,7 +6,7 @@ use log::{debug, error, info, warn};
 use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 mod algorithms;
 mod safe_memio;
@@ -243,6 +243,7 @@ pub struct RepCXL<T> {
     wreq_queue_rx: Option<kanal::Receiver<WriteRequest<T>>>,
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
+    start_time: SystemTime,
     stop_flag: Arc<AtomicBool>,
     logger: Option<utils::ms_logger::MonsterStateLogger>,
 }
@@ -285,6 +286,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             wreq_queue_rx: Some(wrx),
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
+            start_time: SystemTime::now(),
             stop_flag: Arc::new(AtomicBool::new(false)),
             logger: None,
         }
@@ -318,26 +320,25 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Retries the operation up to `config.read_retries` times if it returns a
     /// dirty read.
     pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        let mut res = algorithms::get_read_algorithm_client(
-            &self.config.algorithm,
-            self.view.clone(), 
-            obj);
+        let mut res = Err(String::from("Void read"));
+        // let mstate = self.get_state_from_master().unwrap();
+        // let start_time = mstate.get_starting_block().get_start_time().unwrap();
 
-        for _ in 0..self.config.read_retries {
-            match res {
-                Ok(ReadReturn::ReadDirty(_)) => {
-                 res = algorithms::get_read_algorithm_client(
+        for _ in 0..=self.config.read_retries{
+            res = algorithms::get_read_algorithm_client(
                             &self.config.algorithm,
+                            self.start_time,
+                            Duration::from_nanos(self.config.round_time),
                             self.view.clone(), 
-                            obj);   
-                }
+                            obj); 
+                
+            match res {
+                Ok(ReadReturn::ReadDirty(_)) => continue,
                 _ => break,
-                }
-            
+            }
         }
 
         res
-        
     }
 
     /// Enable state logging to a file. Clears any existing log at the path.
@@ -514,7 +515,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn start(&mut self) {
         let algorithm = self.config.algorithm.clone();
         let rt = Duration::from_nanos(self.config.round_time);
-        let start_time = std::time::SystemTime::now();
+        let start_time = SystemTime::now();
+        self.start_time = start_time;
         let v = self.view.clone();
 
 
@@ -562,7 +564,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
                     // check if all processes are ready
                     if sblock.all_ready(self.view.processes.clone()) {
-                        start_time = std::time::SystemTime::now() + Duration::from_nanos(self.config.startup_delay);
+                        start_time = SystemTime::now() + Duration::from_nanos(self.config.startup_delay);
                         sblock.start_at(start_time);
                         info!("Rounds starting at {:?}", start_time);
 
@@ -579,6 +581,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 std::thread::sleep(Duration::from_millis(100));
                 debug!("Process {} waiting for start...", self.config.id);
             }
+
+            self.start_time = start_time;
 
             let v = self.view.clone();
             // let rt = self.round_time;

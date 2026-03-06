@@ -9,7 +9,7 @@
       template:
         src: config.template.j2
         dest: "{{ local_repo }}/{{ repcxl_config }}"
-      when: repcxl_config == "config/config-ansible.toml"
+      when: repcxl_config == "config/ansible.toml"
 
     - name: synchronize the content of this repo to remote hosts
       synchronize:

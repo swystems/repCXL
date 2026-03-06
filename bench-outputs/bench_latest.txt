@@ -1,7 +1,7 @@
-Date: 20260306_1136
+Date: 20260306_1627
 
 ============= RepCXL configuration =============
-File: config/config-ansible.toml
+File: config/ansible.toml
 # RepCXL configuration file
 # Example usage: <binary> -c config/example.toml
 
@@ -36,7 +36,7 @@ round_time = 1000
 algorithm = "async_best_effort"
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 1
+read_retries = 0
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 1 
@@ -65,225 +65,113 @@ requestdistribution=zipfian
 
 INFO  [ycsb_client] This process is the coordinator. Executing YCSB load phase...
 INFO  [rep_cxl] Process 0 ready and waiting to start
-INFO  [rep_cxl] Rounds starting at SystemTime { tv_sec: 1772793411, tv_nsec: 849579489 }
+INFO  [rep_cxl] Rounds starting at SystemTime { tv_sec: 1772810813, tv_nsec: 774124035 }
 INFO  [ycsb_client] Executing YCSB run phase...
 INFO  [rep_cxl] Stopping repCXL process 0. Goodbye...
 YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.41s
-  Throughput: 710292.88 ops/sec
+  Total operations: 2000000
+  Total time: 2.69s
+  Throughput: 743375.73 ops/sec
   Read errors: 0
   Write errors: 0
-  Safe reads: 482690
-  Dirty reads: 17225
+  Safe reads: 833044
+  Dirty reads: 167545
   Read latencies
-    avg:	1.06μs
-    P50:	943ns (median)
-    P90:	1.79μs
-    P99:	2.42μs
-    P99.99:	8.94μs
-    P100:	57.67μs
-  Write latencies
-    avg:	1.52μs
-    P50:	1.37μs (median)
-    P90:	1.82μs
-    P99:	2.46μs
-    P99.99:	10.84μs
-    P100:	369.33μs
-INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
-INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
-INFO  [rep_cxl] Process 1 ready and waiting to start
-INFO  [rep_cxl] Process 1 sees round starting time set to SystemTime { tv_sec: 1772793411, tv_nsec: 849579489 }
-INFO  [ycsb_client] Executing YCSB run phase...
-INFO  [rep_cxl] Stopping repCXL process 1. Goodbye...
-YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.42s
-  Throughput: 703426.89 ops/sec
-  Read errors: 0
-  Write errors: 0
-  Safe reads: 475526
-  Dirty reads: 24771
-  Read latencies
-    avg:	1.12μs
-    P50:	964ns (median)
-    P90:	1.88μs
-    P99:	2.41μs
-    P99.99:	8.85μs
-    P100:	42.29μs
-  Write latencies
-    avg:	1.48μs
-    P50:	1.35μs (median)
-    P90:	1.76μs
-    P99:	2.42μs
-    P99.99:	10.71μs
-    P100:	132.06μs
-INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
-INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
-INFO  [rep_cxl] Process 2 ready and waiting to start
-INFO  [rep_cxl] Process 2 sees round starting time set to SystemTime { tv_sec: 1772793411, tv_nsec: 849579489 }
-INFO  [ycsb_client] Executing YCSB run phase...
-INFO  [rep_cxl] Stopping repCXL process 2. Goodbye...
-YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.41s
-  Throughput: 708898.48 ops/sec
-  Read errors: 0
-  Write errors: 0
-  Safe reads: 477475
-  Dirty reads: 22431
-  Read latencies
-    avg:	1.09μs
-    P50:	952ns (median)
-    P90:	1.85μs
-    P99:	2.38μs
-    P99.99:	8.97μs
-    P100:	41.41μs
+    avg:	945ns
+    P50:	963ns (median)
+    P90:	1.02μs
+    P99:	1.47μs
+    P99.99:	7.90μs
+    P100:	74.69μs
   Write latencies
     avg:	1.50μs
     P50:	1.37μs (median)
+    P90:	1.77μs
+    P99:	2.41μs
+    P99.99:	10.80μs
+    P100:	1.14ms
+INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
+INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
+INFO  [rep_cxl] Process 1 ready and waiting to start
+INFO  [rep_cxl] Process 1 sees round starting time set to SystemTime { tv_sec: 1772810813, tv_nsec: 774124035 }
+INFO  [ycsb_client] Executing YCSB run phase...
+INFO  [rep_cxl] Stopping repCXL process 1. Goodbye...
+YCSB run phase complete.
+  Total operations: 2000000
+  Total time: 2.61s
+  Throughput: 767702.17 ops/sec
+  Read errors: 0
+  Write errors: 0
+  Safe reads: 817353
+  Dirty reads: 182224
+  Read latencies
+    avg:	963ns
+    P50:	972ns (median)
+    P90:	1.08μs
+    P99:	1.59μs
+    P99.99:	7.96μs
+    P100:	26.72μs
+  Write latencies
+    avg:	1.44μs
+    P50:	1.36μs (median)
     P90:	1.80μs
-    P99:	2.44μs
-    P99.99:	11.48μs
-    P100:	1.13ms
+    P99:	2.23μs
+    P99.99:	10.39μs
+    P100:	650.29μs
+INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
+INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
+INFO  [rep_cxl] Process 2 ready and waiting to start
+INFO  [rep_cxl] Process 2 sees round starting time set to SystemTime { tv_sec: 1772810813, tv_nsec: 774124035 }
+INFO  [ycsb_client] Executing YCSB run phase...
+INFO  [rep_cxl] Stopping repCXL process 2. Goodbye...
+YCSB run phase complete.
+  Total operations: 2000000
+  Total time: 2.71s
+  Throughput: 738813.03 ops/sec
+  Read errors: 0
+  Write errors: 0
+  Safe reads: 805799
+  Dirty reads: 193160
+  Read latencies
+    avg:	961ns
+    P50:	965ns (median)
+    P90:	1.07μs
+    P99:	1.50μs
+    P99.99:	9.81μs
+    P100:	34.37μs
+  Write latencies
+    avg:	1.53μs
+    P50:	1.39μs (median)
+    P90:	1.89μs
+    P99:	2.61μs
+    P99.99:	11.87μs
+    P100:	1.16ms
 INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
 INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
 INFO  [rep_cxl] Process 3 ready and waiting to start
-INFO  [rep_cxl] Process 3 sees round starting time set to SystemTime { tv_sec: 1772793411, tv_nsec: 849579489 }
+INFO  [rep_cxl] Process 3 sees round starting time set to SystemTime { tv_sec: 1772810813, tv_nsec: 774124035 }
 INFO  [ycsb_client] Executing YCSB run phase...
 INFO  [rep_cxl] Stopping repCXL process 3. Goodbye...
 YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.34s
-  Throughput: 748420.82 ops/sec
+  Total operations: 2000000
+  Total time: 2.60s
+  Throughput: 769397.97 ops/sec
   Read errors: 0
   Write errors: 0
-  Safe reads: 480174
-  Dirty reads: 21228
+  Safe reads: 818677
+  Dirty reads: 180952
   Read latencies
-    avg:	1.11μs
-    P50:	970ns (median)
-    P90:	1.84μs
-    P99:	2.42μs
-    P99.99:	8.86μs
-    P100:	98.55μs
+    avg:	981ns
+    P50:	983ns (median)
+    P90:	1.09μs
+    P99:	1.59μs
+    P99.99:	8.10μs
+    P100:	647.70μs
   Write latencies
-    avg:	1.32μs
-    P50:	1.27μs (median)
-    P90:	1.71μs
-    P99:	2.40μs
-    P99.99:	11.10μs
-    P100:	1.14ms
-INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
-INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
-INFO  [rep_cxl] Process 4 ready and waiting to start
-INFO  [rep_cxl] Process 4 sees round starting time set to SystemTime { tv_sec: 1772715852, tv_nsec: 290205444 }
-INFO  [ycsb_client] Executing YCSB run phase...
-INFO  [rep_cxl] Stopping repCXL process 4. Goodbye...
-YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.77s
-  Throughput: 565704.90 ops/sec
-  Read errors: 0
-  Write errors: 0
-  Safe reads: 390022
-  Dirty reads: 109893
-  Read latencies
-    avg:	1.46μs
-    P50:	1.03μs (median)
-    P90:	2.45μs
-    P99:	3.25μs
-    P99.99:	9.99μs
-    P100:	23.66μs
-  Write latencies
-    avg:	1.84μs
-    P50:	1.77μs (median)
-    P90:	2.54μs
-    P99:	3.33μs
-    P99.99:	13.92μs
-    P100:	182.29μs
-INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
-INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
-INFO  [rep_cxl] Process 5 ready and waiting to start
-INFO  [rep_cxl] Process 5 sees round starting time set to SystemTime { tv_sec: 1772715852, tv_nsec: 290205444 }
-INFO  [ycsb_client] Executing YCSB run phase...
-INFO  [rep_cxl] Stopping repCXL process 5. Goodbye...
-YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.73s
-  Throughput: 576636.95 ops/sec
-  Read errors: 0
-  Write errors: 0
-  Safe reads: 386324
-  Dirty reads: 113973
-  Read latencies
-    avg:	1.54μs
-    P50:	1.10μs (median)
-    P90:	2.62μs
-    P99:	3.55μs
-    P99.99:	10.67μs
-    P100:	97.07μs
-  Write latencies
-    avg:	1.70μs
-    P50:	1.68μs (median)
-    P90:	2.44μs
-    P99:	3.22μs
-    P99.99:	11.50μs
-    P100:	242.14μs
-INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
-INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
-INFO  [rep_cxl] Process 6 ready and waiting to start
-INFO  [rep_cxl] Process 6 sees round starting time set to SystemTime { tv_sec: 1772715852, tv_nsec: 290205444 }
-INFO  [ycsb_client] Executing YCSB run phase...
-INFO  [rep_cxl] Stopping repCXL process 6. Goodbye...
-YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.90s
-  Throughput: 527183.22 ops/sec
-  Read errors: 0
-  Write errors: 0
-  Safe reads: 403472
-  Dirty reads: 96434
-  Read latencies
-    avg:	1.62μs
-    P50:	1.18μs (median)
-    P90:	2.67μs
-    P99:	3.48μs
-    P99.99:	10.70μs
-    P100:	30.97μs
-  Write latencies
-    avg:	1.86μs
-    P50:	1.67μs (median)
-    P90:	2.51μs
-    P99:	3.46μs
-    P99.99:	22.36μs
-    P100:	241.62μs
-INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel
-INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
-INFO  [rep_cxl] Process 7 ready and waiting to start
-INFO  [rep_cxl] Process 7 sees round starting time set to SystemTime { tv_sec: 1772715852, tv_nsec: 290205444 }
-INFO  [ycsb_client] Executing YCSB run phase...
-INFO  [rep_cxl] Stopping repCXL process 7. Goodbye...
-YCSB run phase complete.
-  Total operations: 1000000
-  Total time: 1.72s
-  Throughput: 581647.48 ops/sec
-  Read errors: 0
-  Write errors: 0
-  Safe reads: 385186
-  Dirty reads: 116216
-  Read latencies
-    avg:	1.53μs
-    P50:	1.12μs (median)
-    P90:	2.61μs
-    P99:	3.54μs
-    P99.99:	9.85μs
-    P100:	71.42μs
-  Write latencies
-    avg:	1.66μs
-    P50:	1.42μs (median)
-    P90:	2.44μs
-    P99:	3.29μs
-    P99.99:	15.67μs
-    P100:	1.14ms
+    avg:	1.39μs
+    P50:	1.32μs (median)
+    P90:	1.73μs
+    P99:	2.39μs
+    P99.99:	10.37μs
+    P100:	1.15ms
 INFO  [rep_cxl::algorithms::best_effort] Object queue channel closed: receive from a closed channel

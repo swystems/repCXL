@@ -133,8 +133,9 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     
     let mut round_num = 0;
 
-    let mut next_round = start_time;
-    wait_start_time(start_time, ROUND_SLEEP_RATIO);
+    let start_instant = system_time_to_instant(start_time);
+    let mut next_round = start_instant;
+    wait_start_instant(start_instant, ROUND_SLEEP_RATIO);
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -143,7 +144,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
 
         debug!(
             "Round #{round_num}, delay {:?}",
-            SystemTime::now().duration_since(next_round).unwrap()
+            Instant::now().duration_since(next_round)
         );
 
         match req_queue_rx.try_recv() {
@@ -180,7 +181,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        (round_num, next_round) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
+        (round_num, next_round) = wait_next_round_instant(start_instant, round_time, ROUND_SLEEP_RATIO);
     }
 }
 

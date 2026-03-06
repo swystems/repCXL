@@ -32,7 +32,7 @@ round_time = 1000
 algorithm = "async_best_effort"
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 1
+read_retries = 0
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 1 

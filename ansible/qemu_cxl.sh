@@ -21,7 +21,7 @@ fi
 QEMU_ARGS=(
     -name "repcxl-vm${VM_ID}"
     -machine q35
-    -cpu host
+    -cpu host,+invtsc
     -m 8G,slots=2,maxmem=16G
     -smp 4
     --enable-kvm

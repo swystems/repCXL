@@ -1,6 +1,7 @@
 use core::sync;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Instant, SystemTime};
 
 use log::info;
 
@@ -80,8 +81,8 @@ impl MonsterStats {
     }
 }
 
-fn is_overtime(round_start: SystemTime, round_time: Duration) -> bool {
-    SystemTime::now().duration_since(round_start).unwrap() > round_time
+fn is_overtime(round_start: Instant, round_time: Duration) -> bool {
+    Instant::now().duration_since(round_start) > round_time
 }
 
 
@@ -107,9 +108,11 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     let mnode_state = view.get_master_node().unwrap().get_state();
     let owcc = mnode_state.get_owcc();
 
+    let round_zero = system_time_to_instant(start_time);
+
     // wait to start
-    let mut round_start = start_time;
-    wait_start_time(start_time, ROUND_SLEEP_RATIO);
+    let mut round_start = round_zero;
+    wait_start_instant(round_zero, ROUND_SLEEP_RATIO);
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -124,7 +127,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
         monster_info!(monster_state,
             "Round #{round_num}, delay {:?}, obj id: {}",
-            SystemTime::now().duration_since(round_start).unwrap(),
+            Instant::now().duration_since(round_start),
             oid
         );
 
@@ -189,7 +192,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                     // current process is the last writer
                     monster_info!(monster_state, "Process {} is the last writer for object {} in round {}", view.self_id, oid, round_num);
 
-                    if SystemTime::now().duration_since(round_start).unwrap() < round_time {
+                    if !is_overtime(round_start, round_time) {
                         // on time, proceed to Replicate state
                         monster_state = MonsterState::Replicate;
                     } else {
@@ -297,7 +300,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        (round_num, round_start) = wait_next_round(start_time, round_time, ROUND_SLEEP_RATIO);
+        (round_num, round_start) = wait_next_round_instant(round_zero, round_time, ROUND_SLEEP_RATIO);
 
     }
 }
@@ -360,12 +363,16 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
 /// Client-reader: clients perform read operation directly i.e. no read thread
 /// processing requests
 pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
+    start_time: SystemTime,
+    round_time: Duration,
     view: crate::GroupView,
     obj: &crate::RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
 
     // let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
-
+    // let start_instant = system_time_to_instant(start_time);
+    // wait_next_round_instant(start_instant, round_time, ROUND_SLEEP_RATIO);
+    
     match mem_readends(obj.info.offset, &view.memory_nodes) {
         Ok(states) => {
             // check if all states are consistent (have the same wid (i.e. value))

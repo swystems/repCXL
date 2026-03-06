@@ -1,7 +1,7 @@
 use log::{debug, error};
 use std::sync::atomic::{AtomicBool};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::{RepCXLObject, safe_memio};
 use crate::GroupView;
@@ -55,13 +55,52 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
 
 
 pub fn get_read_algorithm_client<T: Copy + PartialEq + std::fmt::Debug>(
-    algorithm: &String, group_view: GroupView, obj: &RepCXLObject<T>,
+    algorithm: &String,
+    start_time: SystemTime,
+    round_time: Duration,
+    group_view: GroupView,
+    obj: &RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_read_client(group_view, obj),
-        "monster" => monster::monster_read_client(group_view, obj),
+        "monster" => monster::monster_read_client(
+            start_time, 
+            round_time, 
+            group_view, 
+            obj),
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
+}
+
+pub fn system_time_to_instant(start_time: SystemTime) -> Instant {
+    let mut best_span = Duration::MAX;
+    let mut best_mono_before = Instant::now();
+    let mut best_mono_after = best_mono_before;
+    let mut best_wall_now = SystemTime::now();
+
+    for _ in 0..8 {
+        let mono_before = Instant::now();
+        let wall_now = SystemTime::now();
+        let mono_after = Instant::now();
+
+        let span = mono_after.duration_since(mono_before);
+        if span < best_span {
+            best_span = span;
+            best_mono_before = mono_before;
+            best_mono_after = mono_after;
+            best_wall_now = wall_now;
+        }
+
+        if span <= Duration::from_micros(10) {
+            break;
+        }
+    }
+
+    let midpoint = best_mono_before + (best_mono_after.duration_since(best_mono_before) / 2);
+    let delay = start_time
+        .duration_since(best_wall_now)
+        .unwrap_or(Duration::ZERO);
+    midpoint + delay
 }
 
 /// Wait until the specified start time, sleeping for a portion of the time and busy-waiting for the rest
@@ -128,6 +167,67 @@ pub fn wait_next_round(
     while SystemTime::now() < next_round {
         std::hint::spin_loop();
         //std::thread::yield_now();
+    }
+
+    (round_num + 1, next_round)
+}
+
+/// Wait until a monotonic start instant, sleeping for a portion of the time and
+/// busy-waiting for the rest.
+pub fn wait_start_instant(start_instant: Instant, sleep_ratio: f64) {
+    let wait_duration = start_instant
+        .checked_duration_since(Instant::now())
+        .unwrap_or(Duration::from_secs(0));
+
+    if sleep_ratio < 0.0 || sleep_ratio > 1.0 {
+        panic!("sleep_ratio must be between 0.0 and 1.0");
+    }
+
+    let sleep_duration = wait_duration.mul_f64(sleep_ratio);
+
+    if wait_duration > sleep_duration {
+        std::thread::sleep(sleep_duration);
+        if Instant::now() >= start_instant {
+            return;
+        }
+    }
+
+    while Instant::now() < start_instant {
+        std::hint::spin_loop();
+    }
+}
+
+/// Wait for the next round based on a monotonic start instant. Returns its
+/// number and start instant.
+pub fn wait_next_round_instant(
+    start_instant: Instant,
+    round_time: Duration,
+    sleep_ratio: f64,
+) -> (u64, Instant) {
+    if sleep_ratio < 0.0 || sleep_ratio > 1.0 {
+        panic!("sleep_ratio must be between 0.0 and 1.0");
+    }
+
+    let elapsed = Instant::now().duration_since(start_instant);
+    let round_time_ns = round_time.as_nanos();
+    if round_time_ns == 0 {
+        panic!("round_time must be greater than zero");
+    }
+
+    let round_num = (elapsed.as_nanos() / round_time_ns) as u64;
+    let wake_up_time = round_time.mul_f64(sleep_ratio);
+    let next_round = start_instant
+        + Duration::from_nanos((round_time_ns * (round_num as u128 + 1)) as u64);
+    let round_elapsed = Duration::from_nanos(
+        (elapsed.as_nanos() - (round_time_ns * round_num as u128)) as u64,
+    );
+
+    if round_elapsed < wake_up_time {
+        std::thread::sleep(wake_up_time - round_elapsed);
+    }
+
+    while Instant::now() < next_round {
+        std::hint::spin_loop();
     }
 
     (round_num + 1, next_round)

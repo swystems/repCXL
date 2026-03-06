@@ -21,7 +21,7 @@ impl StartingBlock {
     }
 
     pub(crate) fn start_is_scheduled(&self) -> bool {
-        self.start_time.is_some() && self.start_time.unwrap() > SystemTime::now()
+        self.start_time.is_some()
     }
 
     pub(crate) fn get_start_time(&self) -> Option<SystemTime> {
