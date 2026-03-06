@@ -29,7 +29,7 @@ startup_delay = 1000000000
 round_time = 1000 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "monster"
+algorithm = "async_best_effort"
 
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = 1

@@ -22,6 +22,25 @@ For each VM (parameters can be changed in `cxl_vm.sh`)
 
 ## howto
 
+### Running benchmark with duplicated VM aliases
+
+When you duplicate VM entries in inventory (for example multiple `vmX` aliases
+pointing to the same `ansible_host`/port) to run multiple RepCXL process IDs on
+the same machine, make sure Ansible parallelism is high enough.
+
+If `forks` stays at the default (`5`), a benchmark with more than 5 long-running
+client tasks can appear blocked because extra hosts wait in Ansible's queue and
+their `run_ycsb_client.sh` command is never started.
+
+This repo includes `ansible/ansible.cfg` with:
+
+```ini
+[defaults]
+forks = 32
+```
+
+Run playbooks from the `ansible/` directory so this config is picked up.
+
 ### Create a VM in localhost with ubuntu 24.04 and CXL memory mapped to NUMA node 0. 
 
     cd ansible 

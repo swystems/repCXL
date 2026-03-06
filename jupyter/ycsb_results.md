@@ -31,7 +31,7 @@ monster-10us	| 470k  | 730ns\9.5us    | 26us\640us      | 0.0009%     | 0       
 
 > # clients: 4 
 > # mem nodes: 3
-> workload: workloadb_64_contention
+> workload: workloada_64_contention
 
 		         | tput	| read avg | write avg | dirty-reads | conflicts | sync failures | 
 ----------------------------------------------------------------------------------------------------
