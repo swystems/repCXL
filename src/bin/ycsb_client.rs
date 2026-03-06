@@ -48,7 +48,7 @@ fn main() {
     let run_trace = extra_args.get_one::<String>("run_trace").unwrap();
 
     let workload = load_ycsb_workload(load_trace, run_trace);
-    workload.summary();
+    // workload.summary();
 
     debug!("First 5 load operations:");
     for (i, op) in workload.load_ops.iter().enumerate().take(5) {
