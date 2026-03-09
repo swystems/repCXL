@@ -53,11 +53,11 @@ fn main() {
 
             let obj100 = rcxl.get_object(100).expect("failed to get object");
             match obj100.read().expect("failed to read from object") {
-                rep_cxl::ReadReturn::ReadSafe(buf) => {
+                rep_cxl::request::ReadReturn::ReadSafe(buf) => {
                     assert_eq!(buf, msg, "replica read incorrect data");
                     println!("Replica successfully read: {}", String::from_utf8_lossy(&buf));
                 },
-                rep_cxl::ReadReturn::ReadDirty(_) => {
+                rep_cxl::request::ReadReturn::ReadDirty(_) => {
                     println!("Read dirty detected, something went wrong");
 
                 },

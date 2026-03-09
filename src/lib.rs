@@ -3,15 +3,18 @@
 /// all machines.
 use log::{debug, error, info, warn};
 
-use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, Instant};
 
 mod algorithms;
 mod safe_memio;
+use safe_memio::ObjectMemoryEntry;
 mod shmem;
+mod timer;
 pub mod utils;
+pub mod request;
+use request::{WriteRequest, ReadRequest, ReadReturn};
 use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
 pub mod config;
@@ -73,48 +76,12 @@ impl PartialEq for GroupView {
         self_procs == other_procs && self_nodes == other_nodes
     }
 }
-pub struct WriteRequest<T> {
-    pub(crate) obj_info: ObjectInfo,
-    pub data: T,
-    pub ack_tx: kanal::Sender<bool>,
-}
-
-impl<T> WriteRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: kanal::Sender<bool>) -> Self {
-        WriteRequest {
-            obj_info,
-            data,
-            ack_tx,
-        }
-    }
-
-    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, kanal::Sender<bool>) {
-        (self.obj_info, self.data, self.ack_tx)
-    }
-}
-
-pub struct ReadRequest<T> {
-    pub(crate) obj_info: ObjectInfo,
-    pub ack_tx: kanal::Sender<ReadReturn<T>>,
-}
-
-impl<T> ReadRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: kanal::Sender<ReadReturn<T>>) -> Self {
-        ReadRequest { obj_info, ack_tx }
-    }
-}
-
-#[derive(Debug)]
-pub enum ReadReturn<T> {
-    ReadSafe(T),
-    ReadDirty(T),
-}
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T: Copy> {
     wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
-    info: ObjectInfo, // could also just store the offset
+    info: ObjectInfo,
 }
 
 impl<T: Copy> RepCXLObject<T> {
@@ -164,74 +131,7 @@ impl<T: Copy> RepCXLObject<T> {
     }
 }
 
-/// RepCXL write request unique identifier. Stored next to every object
-/// Comparison checks for largest round number and smallest process ID if
-/// round numbers are equal.
-#[derive(Debug, Clone, Copy)]
-struct Wid {
-    round_num: u64,
-    process_id: usize,
-}
 
-impl PartialEq for Wid {
-    fn eq(&self, other: &Self) -> bool {
-        self.round_num == other.round_num && self.process_id == other.process_id
-    }
-}
-impl Eq for Wid {}
-
-impl PartialOrd for Wid {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Wid {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.round_num.cmp(&other.round_num) {
-            std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
-            std::cmp::Ordering::Less => std::cmp::Ordering::Less,
-            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id),
-        }
-    }
-}
-
-impl Hash for Wid {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.round_num.hash(state);
-        self.process_id.hash(state);
-    }
-}
-
-impl Wid {
-    pub fn new(round_num: u64, process_id: usize) -> Self {
-        Wid {
-            round_num,
-            process_id,
-        }
-    }
-}
-
-/// ObjectMemoryEntry. Stores the current write ID and the value of the object
-/// in memory.
-#[derive(Debug, Clone, Copy)]
-struct ObjectMemoryEntry<T> {
-    wid: Wid,
-    value: T,
-}
-
-impl<T: Copy> ObjectMemoryEntry<T> {
-    pub fn new(wid: Wid, value: T) -> Self {
-        ObjectMemoryEntry { wid, value }
-    }
-
-    pub fn new_nowid(value: T) -> Self {
-        ObjectMemoryEntry {
-            wid: Wid::new(0, 0),
-            value,
-        }
-    }
-}
 
 /// Main RepCXL structure in local memory/cache for each process
 /// current version only supports objects of type T
@@ -243,7 +143,6 @@ pub struct RepCXL<T> {
     wreq_queue_rx: Option<kanal::Receiver<WriteRequest<T>>>,
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
-    start_time: SystemTime,
     start_instant: Instant,
     stop_flag: Arc<AtomicBool>,
     logger: Option<utils::ms_logger::MonsterStateLogger>,
@@ -287,7 +186,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             wreq_queue_rx: Some(wrx),
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
-            start_time: SystemTime::now(),
             start_instant: std::time::Instant::now(),
             stop_flag: Arc::new(AtomicBool::new(false)),
             logger: None,
@@ -517,10 +415,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn start(&mut self) {
         let algorithm = self.config.algorithm.clone();
         let rt = Duration::from_nanos(self.config.round_time);
-        let start_time = SystemTime::now(); 
         let start_instant = Instant::now();
-        self.start_time = start_time;
-        self.start_instant = algorithms::system_time_to_instant(start_time);
+        self.start_instant = start_instant;
 
         let v = self.view.clone();
 
@@ -587,8 +483,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 debug!("Process {} waiting for start...", self.config.id);
             }
 
-            self.start_time = start_time;
-            let start_instant = algorithms::system_time_to_instant(start_time);
+            let start_instant = timer::system_time_to_instant(start_time);
             self.start_instant = start_instant;
 
             let v = self.view.clone();

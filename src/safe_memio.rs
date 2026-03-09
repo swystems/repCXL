@@ -9,7 +9,7 @@
 
 use rand::Rng;
 use rand::prelude::IndexedRandom;  // Enables choose() on slices
-use crate::ObjectMemoryEntry;
+use crate::request::{Wid};
 use crate::shmem::MemoryNode;
 use log::error;
 
@@ -17,6 +17,28 @@ const FAILURE_PROBABILITY: f32 = 0.0;
 
 #[derive(Debug)]
 pub struct MemoryError(pub usize);
+
+
+/// ObjectMemoryEntry. Stores the current write ID and the value of the object
+/// in memory.
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectMemoryEntry<T> {
+    pub wid: Wid,
+    pub value: T,
+}
+
+impl<T: Copy> ObjectMemoryEntry<T> {
+    pub fn new(wid: Wid, value: T) -> Self {
+        ObjectMemoryEntry { wid, value }
+    }
+
+    pub fn new_nowid(value: T) -> Self {
+        ObjectMemoryEntry {
+            wid: Wid::new(0, 0),
+            value,
+        }
+    }
+}
 
 pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
     if FAILURE_PROBABILITY > 0.0 {

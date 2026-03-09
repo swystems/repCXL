@@ -1,16 +1,16 @@
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, Instant};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use log::{info,error};
+use log::{info,error,debug};
 use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
-use safe_memio::{mem_readall, mem_writeall, mem_readends, MemoryError};
-
-use super::*;
+use crate::safe_memio::{safe_write, mem_readall, mem_writeall, mem_readends, MemoryError};
+use crate::{GroupView, WriteRequest, ReadRequest};
+use crate::timer;
 
 
 pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
-    view: crate::GroupView,
+    view: GroupView,
     _start_time: Instant,
     _round_time: Duration,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,
@@ -30,7 +30,7 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
                 for node in &view.memory_nodes {
                     let addr = node.addr_at(oi.offset) as *mut ObjectMemoryEntry<T>;
                     let entry = ObjectMemoryEntry::new_nowid(data);
-                    safe_memio::safe_write(addr, entry).unwrap_or_else(|e| {
+                    safe_write(addr, entry).unwrap_or_else(|e| {
                         error!(
                             "Safe write failed at node {} offset {}: {}",
                             node.id, oi.offset, e
@@ -54,7 +54,7 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
 /// ReadReturn. inter-thread communication might lead to overhead, prefer 
 /// _client version for better latency  
 pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
-    view: crate::GroupView,
+    view: GroupView,
     _start_time: SystemTime,
     _round_time: Duration,
     req_queue_rx: kanal::Receiver<ReadRequest<T>>,
@@ -135,7 +135,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
 
     // let start_instant = system_time_to_instant(start_time);
     let mut next_round = start_instant;
-    wait_start_instant(start_instant, ROUND_SLEEP_RATIO);
+    timer::wait_start_instant(start_instant, timer::ROUND_SLEEP_RATIO);
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -181,7 +181,10 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        (round_num, next_round) = wait_next_round_instant(start_instant, round_time, ROUND_SLEEP_RATIO);
+        (round_num, next_round) = timer::wait_next_round_instant(
+            start_instant, 
+            round_time, 
+            timer::ROUND_SLEEP_RATIO);
     }
 }
 

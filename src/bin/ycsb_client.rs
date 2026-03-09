@@ -4,7 +4,8 @@
 use core::panic;
 use rep_cxl::utils::ycsb::load_ycsb_workload;
 use rep_cxl::utils::arg_parser::ArgParser;
-use rep_cxl::{RepCXL, ReadReturn};
+use rep_cxl::{RepCXL};
+use rep_cxl::request::ReadReturn;
 use rep_cxl::utils;
 use clap::{Arg, value_parser};
 use log::{debug, info, error};

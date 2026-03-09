@@ -1,4 +1,4 @@
-Date: 20260309_1240
+Date: 20260309_1333
 
 ============= RepCXL configuration =============
 File: config/ansible.toml
@@ -65,113 +65,113 @@ requestdistribution=zipfian
 
 INFO  [ycsb_client] This process is the coordinator. Executing YCSB load phase...
 INFO  [rep_cxl] Process 0 ready and waiting to start
-INFO  [rep_cxl] Rounds starting at SystemTime { tv_sec: 1773056423, tv_nsec: 641839577 }
+INFO  [rep_cxl] Rounds starting at SystemTime { tv_sec: 1773059608, tv_nsec: 717989529 }
 INFO  [ycsb_client] Executing YCSB run phase...
 INFO  [rep_cxl] Stopping repCXL process 0. Goodbye...
-INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=2949, empty_requests=2447860, rewrites=0
+INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=3058, empty_requests=1568093, rewrites=0
 YCSB run phase complete.
   Total operations: 2000000
-  Total time: 5.51s
-  Throughput: 362951.16 ops/sec
+  Total time: 4.64s
+  Throughput: 431463.22 ops/sec
   Read errors: 0
   Write errors: 0
-  Safe reads: 909572
-  Dirty reads: 90176
+  Safe reads: 873895
+  Dirty reads: 125853
   Read latencies
-    avg:	1.72μs
-    P50:	1.80μs (median)
-    P90:	2.05μs
-    P99:	2.48μs
-    P99.99:	9.07μs
-    P100:	111.20μs
+    avg:	841ns
+    P50:	880ns (median)
+    P90:	1.16μs
+    P99:	1.46μs
+    P99.99:	7.70μs
+    P100:	93.12μs
   Write latencies
-    avg:	3.57μs
+    avg:	3.59μs
     P50:	3.63μs (median)
-    P90:	4.09μs
-    P99:	4.68μs
-    P99.99:	11.50μs
-    P100:	766.41μs
+    P90:	4.06μs
+    P99:	4.79μs
+    P99.99:	11.53μs
+    P100:	816.67μs
 INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
 INFO  [rep_cxl] Process 1 ready and waiting to start
-INFO  [rep_cxl] Process 1 sees round starting time set to SystemTime { tv_sec: 1773056423, tv_nsec: 641839577 }
+INFO  [rep_cxl] Process 1 sees round starting time set to SystemTime { tv_sec: 1773059608, tv_nsec: 717989529 }
 INFO  [ycsb_client] Executing YCSB run phase...
 INFO  [rep_cxl] Stopping repCXL process 1. Goodbye...
-INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=3851, empty_requests=2493810, rewrites=0
+INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=3418, empty_requests=1551001, rewrites=0
 YCSB run phase complete.
   Total operations: 2000000
-  Total time: 5.67s
-  Throughput: 352798.62 ops/sec
+  Total time: 4.80s
+  Throughput: 416256.19 ops/sec
   Read errors: 0
   Write errors: 0
-  Safe reads: 883705
-  Dirty reads: 114743
+  Safe reads: 813367
+  Dirty reads: 185081
   Read latencies
-    avg:	1.74μs
-    P50:	1.82μs (median)
-    P90:	2.08μs
-    P99:	2.56μs
-    P99.99:	9.05μs
-    P100:	28.68μs
+    avg:	842ns
+    P50:	887ns (median)
+    P90:	1.15μs
+    P99:	1.54μs
+    P99.99:	7.26μs
+    P100:	501.76μs
   Write latencies
-    avg:	3.70μs
-    P50:	3.67μs (median)
-    P90:	4.13μs
+    avg:	3.74μs
+    P50:	3.63μs (median)
+    P90:	3.90μs
     P99:	4.62μs
-    P99.99:	11.36μs
-    P100:	112.86ms
+    P99.99:	10.70μs
+    P100:	188.06ms
 INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
 INFO  [rep_cxl] Process 2 ready and waiting to start
-INFO  [rep_cxl] Process 2 sees round starting time set to SystemTime { tv_sec: 1773056423, tv_nsec: 641839577 }
+INFO  [rep_cxl] Process 2 sees round starting time set to SystemTime { tv_sec: 1773059608, tv_nsec: 717989529 }
 INFO  [ycsb_client] Executing YCSB run phase...
 INFO  [rep_cxl] Stopping repCXL process 2. Goodbye...
-INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=3776, empty_requests=2243035, rewrites=0
+INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=4093, empty_requests=1481301, rewrites=0
 YCSB run phase complete.
   Total operations: 2000000
-  Total time: 6.25s
-  Throughput: 320234.41 ops/sec
+  Total time: 5.52s
+  Throughput: 362422.41 ops/sec
   Read errors: 0
   Write errors: 0
-  Safe reads: 933631
-  Dirty reads: 66559
+  Safe reads: 906874
+  Dirty reads: 93316
   Read latencies
-    avg:	1.62μs
-    P50:	1.75μs (median)
-    P90:	2.03μs
-    P99:	2.37μs
-    P99.99:	8.90μs
-    P100:	751.25μs
+    avg:	805ns
+    P50:	872ns (median)
+    P90:	1.14μs
+    P99:	1.38μs
+    P99.99:	7.88μs
+    P100:	21.52μs
   Write latencies
-    avg:	4.40μs
-    P50:	3.59μs (median)
-    P90:	4.06μs
-    P99:	4.53μs
-    P99.99:	11.86μs
-    P100:	944.54ms
+    avg:	4.50μs
+    P50:	3.61μs (median)
+    P90:	4.04μs
+    P99:	4.50μs
+    P99.99:	11.19μs
+    P100:	979.44ms
 INFO  [ycsb_client] This process is a replica. Waiting for coordinator to execute YCSB workload...
 INFO  [rep_cxl] Process 3 ready and waiting to start
-INFO  [rep_cxl] Process 3 sees round starting time set to SystemTime { tv_sec: 1773056423, tv_nsec: 641839577 }
+INFO  [rep_cxl] Process 3 sees round starting time set to SystemTime { tv_sec: 1773059608, tv_nsec: 717989529 }
 INFO  [ycsb_client] Executing YCSB run phase...
 INFO  [rep_cxl] Stopping repCXL process 3. Goodbye...
-INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=3129, empty_requests=2417651, rewrites=0
+INFO  [rep_cxl::algorithms::monster] Monster stats: conflicts=0, sync_failures=3185, empty_requests=1545610, rewrites=0
 YCSB run phase complete.
   Total operations: 2000000
-  Total time: 5.47s
-  Throughput: 365873.41 ops/sec
+  Total time: 4.60s
+  Throughput: 435080.05 ops/sec
   Read errors: 0
   Write errors: 0
-  Safe reads: 918772
-  Dirty reads: 81335
+  Safe reads: 867757
+  Dirty reads: 132350
   Read latencies
-    avg:	1.71μs
-    P50:	1.79μs (median)
-    P90:	2.09μs
-    P99:	2.59μs
-    P99.99:	9.24μs
-    P100:	809.05μs
+    avg:	844ns
+    P50:	876ns (median)
+    P90:	1.18μs
+    P99:	1.55μs
+    P99.99:	7.82μs
+    P100:	45.88μs
   Write latencies
-    avg:	3.53μs
+    avg:	3.54μs
     P50:	3.63μs (median)
-    P90:	4.07μs
-    P99:	4.56μs
-    P99.99:	11.15μs
-    P100:	791.57μs
+    P90:	4.06μs
+    P99:	4.53μs
+    P99.99:	11.47μs
+    P100:	745.27μs
