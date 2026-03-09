@@ -42,3 +42,20 @@ monster-1us rr=0 | 444k  | 850ns   | 3.40us	   | 0.7%   	 | 0	     | ?    	     
 monster-1us rr=1 | 410K  | 900ns   | 3.60us	   | 0.08%   	 | 10	     | ?    	     |	
 monster-1us rr=10| 410k  | 900ns   | 3.62us	   | 0.06%   	 | 0	     | ?    	     |	
 
+> # clients: 4 
+> # mem nodes: 3
+> workload: workloada_64_single
+
+Notes: isol cores om both host and VM
+
+		         | tput	| read avg | write avg | dirty-reads | conflicts | sync failures | 
+----------------------------------------------------------------------------------------------------
+async rr=0       | 820k  | 890ns    | 1.5us     | 15.3%	     | x         | x             |
+async rr=1       | 700k  | 1.18us   | 1.45us   | 3.64%	     | x         | x             |
+async rr=10      | 640k  | 1.3us    | 1.62us	   | 0.73%	     | x         | x             |
+monster-1us rr=0 | 420k  | 1us      | 3.47us	   | 8.5%   	 | 0	     | 0.16    	     |	
+monster-1us rr=1 | 407k  | 1.16us   | 3.53us   | 1.82%   	 | 10	     | 0.16    	     |	
+monster-1us rr=10| 400k  | 1.22ns   | 3.62us   | 0.2%   	 | 0	     | 0.16 	     |	
+m-1us rds rr=0   | 420k  | 1.72us   | 3.47us   | 9%   	 | 0	     | 0.16    	     |	
+m-1us rds rr=1   | 350k  | 1.80us   | 3.53us   | 1.42%   	 | 10	     | 0.16    	     |	
+m-1us rds rr=10  | 320k  | 2.1ns    | 3.62us   | 0.2%   	 | 0	     | 0.16 	     |	

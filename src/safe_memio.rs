@@ -19,12 +19,13 @@ const FAILURE_PROBABILITY: f32 = 0.0;
 pub struct MemoryError(pub usize);
 
 pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
-    // let mut rng = rand::rng();
-    // let roll: f32 = rng.random(); // random float between 0.0 and 1.0
-    // if roll < FAILURE_PROBABILITY {
-    //     return Err("Simulated write failure");
-    // }
-
+    if FAILURE_PROBABILITY > 0.0 {
+        let mut rng = rand::rng();
+        let roll: f32 = rng.random(); // random float between 0.0 and 1.0
+        if roll < FAILURE_PROBABILITY {
+            return Err("Simulated write failure");
+        }
+    }
     unsafe {
         std::ptr::write(addr, data);
     }
@@ -32,10 +33,12 @@ pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEn
 }
 
 pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemoryEntry<T>, &'static str> {
-    let mut rng = rand::rng();
-    let roll: f32 = rng.random(); // random float between 0.0 and 1.0
-    if roll < FAILURE_PROBABILITY {
-        return Err("Simulated read failure");
+    if FAILURE_PROBABILITY > 0.0 {
+        let mut rng = rand::rng();
+        let roll: f32 = rng.random(); // random float between 0.0 and 1.0
+        if roll < FAILURE_PROBABILITY {
+            return Err("Simulated read failure");
+        }
     }
 
     unsafe { Ok(std::ptr::read(addr)) }
@@ -80,7 +83,7 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
 
 /// Read the value from all memory nodes for the given object
 pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
-    let mut states = Vec::new();
+    let mut states = Vec::with_capacity(mem_nodes.len());
     for node in mem_nodes {
         let addr = node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
         match safe_read(addr) {
@@ -101,14 +104,13 @@ pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resul
 /// Read the value from the first and last memory nodes only, exploiting the
 /// fact that memory nodes are written to always in the same order. Used for
 /// scalability improvements
-pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
-    let mut states = Vec::new();
+pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
     
     // read the first node
     let first_node = &mem_nodes[0];
     let addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    match safe_read(addr) {
-        Ok(data) => states.push(data),
+    let first = match safe_read(addr) {
+        Ok(data) => data,
         Err(e) => {
             error!(
                 "Safe read failed. Node {}, offset {}: {}",
@@ -116,13 +118,13 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
             );
             return Err(MemoryError(first_node.id));
         }
-    }
+    };
     
     // read the last node
     let last_node = &mem_nodes[mem_nodes.len() - 1];
     let addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    match safe_read(addr) {
-        Ok(data) => states.push(data),
+    let last = match safe_read(addr) {
+        Ok(data) => data,
         Err(e) => {
             error!(
                 "Safe read failed. Node {}, offset {}: {}",
@@ -130,7 +132,8 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
             );
             return Err(MemoryError(last_node.id));
         }
-    }
-    Ok(states)
+    };
+
+    Ok([first, last])
 }
 

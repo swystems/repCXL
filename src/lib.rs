@@ -6,7 +6,7 @@ use log::{debug, error, info, warn};
 use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, Instant};
 
 mod algorithms;
 mod safe_memio;
@@ -244,6 +244,7 @@ pub struct RepCXL<T> {
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
     start_time: SystemTime,
+    start_instant: Instant,
     stop_flag: Arc<AtomicBool>,
     logger: Option<utils::ms_logger::MonsterStateLogger>,
 }
@@ -287,6 +288,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
             start_time: SystemTime::now(),
+            start_instant: std::time::Instant::now(),
             stop_flag: Arc::new(AtomicBool::new(false)),
             logger: None,
         }
@@ -327,9 +329,9 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         for _ in 0..=self.config.read_retries{
             res = algorithms::get_read_algorithm_client(
                             &self.config.algorithm,
-                            self.start_time,
+                            self.start_instant,
                             Duration::from_nanos(self.config.round_time),
-                            self.view.clone(), 
+                            &self.view, 
                             obj); 
                 
             match res {
@@ -515,8 +517,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn start(&mut self) {
         let algorithm = self.config.algorithm.clone();
         let rt = Duration::from_nanos(self.config.round_time);
-        let start_time = SystemTime::now();
+        let start_time = SystemTime::now(); 
+        let start_instant = Instant::now();
         self.start_time = start_time;
+        self.start_instant = algorithms::system_time_to_instant(start_time);
+
         let v = self.view.clone();
 
 
@@ -527,7 +532,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             let logger = self.logger.take();
             let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
             std::thread::spawn(move || {
-                algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
+                algorithms::get_write_algorithm(algorithm)(v, start_instant, rt, rx, stop, logger);
             });
         }
 
@@ -583,6 +588,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             }
 
             self.start_time = start_time;
+            let start_instant = algorithms::system_time_to_instant(start_time);
+            self.start_instant = start_instant;
 
             let v = self.view.clone();
             // let rt = self.round_time;
@@ -600,7 +607,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                     if let Some(core) = core_affinity {
                          core_affinity::set_for_current(core_affinity::CoreId { id: core });
                     }
-                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
+                    algorithms::get_write_algorithm(algorithm)(v, start_instant, rt, rx, stop, logger);
                 });
             }
 

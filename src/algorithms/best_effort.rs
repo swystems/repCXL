@@ -11,7 +11,7 @@ use super::*;
 
 pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
-    _start_time: SystemTime,
+    _start_time: Instant,
     _round_time: Duration,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
@@ -98,7 +98,7 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
 /// Client-reader: clients perform read operation directly i.e. no read thread
 /// processing requests
 pub fn async_best_effort_read_client<T: Copy + PartialEq + std::fmt::Debug>(
-    view: crate::GroupView,
+    view: &crate::GroupView,
     obj: &crate::RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
 
@@ -124,7 +124,7 @@ pub fn async_best_effort_read_client<T: Copy + PartialEq + std::fmt::Debug>(
 
 pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
-    start_time: SystemTime,
+    start_instant: Instant,
     round_time: Duration,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
@@ -133,7 +133,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     
     let mut round_num = 0;
 
-    let start_instant = system_time_to_instant(start_time);
+    // let start_instant = system_time_to_instant(start_time);
     let mut next_round = start_instant;
     wait_start_instant(start_instant, ROUND_SLEEP_RATIO);
 

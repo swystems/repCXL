@@ -88,7 +88,7 @@ fn is_overtime(round_start: Instant, round_time: Duration) -> bool {
 
 pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: super::GroupView,
-    start_time: SystemTime,
+    start_instant: Instant,
     round_time: Duration,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
@@ -108,7 +108,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     let mnode_state = view.get_master_node().unwrap().get_state();
     let owcc = mnode_state.get_owcc();
 
-    let round_zero = system_time_to_instant(start_time);
+    let round_zero = start_instant;
 
     // wait to start
     let mut round_start = round_zero;
@@ -363,15 +363,15 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
 /// Client-reader: clients perform read operation directly i.e. no read thread
 /// processing requests
 pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
-    start_time: SystemTime,
+    start_instant: Instant,
     round_time: Duration,
-    view: crate::GroupView,
+    view: &crate::GroupView,
     obj: &crate::RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
 
     // let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
     // let start_instant = system_time_to_instant(start_time);
-    // wait_next_round_instant(start_instant, round_time, ROUND_SLEEP_RATIO);
+    wait_next_round_instant(start_instant, round_time, ROUND_SLEEP_RATIO);
     
     match mem_readends(obj.info.offset, &view.memory_nodes) {
         Ok(states) => {

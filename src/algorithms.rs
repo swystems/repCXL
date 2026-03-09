@@ -20,7 +20,7 @@ pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: String,
 ) -> fn(
     GroupView,
-    SystemTime,
+    Instant,
     Duration,
     kanal::Receiver<WriteRequest<T>>,
     Arc<AtomicBool>,
@@ -56,15 +56,15 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
 
 pub fn get_read_algorithm_client<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: &String,
-    start_time: SystemTime,
+    start_instant: Instant,
     round_time: Duration,
-    group_view: GroupView,
+    group_view: &GroupView,
     obj: &RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_read_client(group_view, obj),
         "monster" => monster::monster_read_client(
-            start_time, 
+            start_instant, 
             round_time, 
             group_view, 
             obj),
