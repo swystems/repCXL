@@ -4,7 +4,7 @@ use std::time::{Instant, SystemTime, Duration};
 use log::{error, debug};
 
 // use super::*;
-use crate::timer::*;
+use crate::timer;
 use crate::request::{Wid, WriteRequest, ReadRequest, ReadReturn};
 use crate::safe_memio::{ObjectMemoryEntry, mem_writeall, mem_readall, mem_readends, MemoryError};
 use crate::utils::ms_logger;
@@ -110,7 +110,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
     // wait to start
     let mut round_start = round_zero;
-    wait_start_instant(round_zero, ROUND_SLEEP_RATIO);
+    timer::wait_start_time(round_zero, timer::ROUND_SLEEP_RATIO);
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -298,7 +298,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        (round_num, round_start) = wait_next_round_instant(round_zero, round_time, ROUND_SLEEP_RATIO);
+        (round_num, round_start) = timer::wait_next_round(round_zero, round_time, timer::ROUND_SLEEP_RATIO);
 
     }
 }
@@ -369,8 +369,9 @@ pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
 
     // let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
     // let start_instant = system_time_to_instant(start_time);
-    wait_next_round_instant(start_instant, round_time, ROUND_SLEEP_RATIO);
-    
+    // timer::wait_next_round(start_instant, round_time, timer::ROUND_SLEEP_RATIO);
+    timer::wait_round_progress(0.8, start_instant, round_time, timer::ROUND_SLEEP_RATIO);
+
     match mem_readends(obj.info.offset, &view.memory_nodes) {
         Ok(states) => {
             // check if all states are consistent (have the same wid (i.e. value))

@@ -135,7 +135,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
 
     // let start_instant = system_time_to_instant(start_time);
     let mut next_round = start_instant;
-    timer::wait_start_instant(start_instant, timer::ROUND_SLEEP_RATIO);
+    timer::wait_start_time(start_instant, timer::ROUND_SLEEP_RATIO);
 
     loop {
         if stop_flag.load(Ordering::Relaxed) {
@@ -181,7 +181,7 @@ pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        (round_num, next_round) = timer::wait_next_round_instant(
+        (round_num, next_round) = timer::wait_next_round(
             start_instant, 
             round_time, 
             timer::ROUND_SLEEP_RATIO);

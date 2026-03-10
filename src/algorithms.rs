@@ -1,18 +1,16 @@
-use log::{debug, error};
 use std::sync::atomic::{AtomicBool};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::{RepCXLObject, safe_memio};
-use crate::GroupView;
-use crate::{WriteRequest,ReadRequest,ReadReturn};
+use crate::{GroupView, RepCXLObject};
+use crate::request::{WriteRequest,ReadRequest,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
 
 pub mod best_effort;
 pub mod monster;
 
 // CONFIGURATION
-const _ALGORITHM: &str = "sync_best_effort"; // default algorithm
+// const _ALGORITHM: &str = "sync_best_effort"; // default algorithm
 
 
 pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
