@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use crate::{MAX_OBJECTS, MAX_PROCESSES};
+use crate::safe_memio;
 
 /// Write Conflict Checker (WCC) register to solve write conflicts
 #[derive(Debug, Clone, Copy)]
@@ -115,7 +116,8 @@ impl ObjectWCC {
         if pid >= MAX_PROCESSES {  
             return; // invalid pid
         }
-        self.p_round[pid] = ObjectWCCEntry::new(oid, round);
+        let entry = ObjectWCCEntry::new(oid, round);
+        safe_memio::mem_write(&mut self.p_round[pid], entry);
     }
 
     /// Check if the given process is the last writer for the given object.
@@ -124,21 +126,31 @@ impl ObjectWCC {
     /// - the winning process has written in the largest round smaller than
     /// the current round
     /// - in case of conflicts, the smallest pid wins
-    pub fn is_last(&self, oid_in: usize, current_round:u64, round_in: u64, pid_in: usize) -> bool {
+    pub fn is_last(&mut self, oid_in: usize, current_round:u64, round_in: u64, pid_in: usize) -> bool {
         if pid_in > MAX_PROCESSES {
             return false; // invalid pid
         }
 
+        // single bulk flush of the entire p_round array + mfence, then
+        // read_volatile per entry (avoids 128 individual flushes)
+        unsafe {
+            safe_memio::cache_flush_read(
+                self.p_round.as_ptr() as *const u8,
+                std::mem::size_of::<[ObjectWCCEntry; MAX_PROCESSES]>(),
+            );
+        }
+
         for i in 0..MAX_PROCESSES {
+            let entry = unsafe { std::ptr::read_volatile(&self.p_round[i]) };
             // check only entries for the same object ID
-            if self.p_round[i].oid != oid_in {
+            if entry.oid != oid_in {
                 continue;
             }
 
-            if current_round > self.p_round[i].round && self.p_round[i].round > round_in {
+            if current_round > entry.round && entry.round > round_in {
                 return false; // another process has written in a larger round
             }
-            if self.p_round[i].round == round_in && i < pid_in {
+            if entry.round == round_in && i < pid_in {
                 return false; // another process has lower pid
             }
         }

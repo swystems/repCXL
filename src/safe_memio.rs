@@ -14,6 +14,53 @@ use crate::shmem::MemoryNode;
 use log::error;
 
 const FAILURE_PROBABILITY: f32 = 0.0;
+const CACHE_LINE_SIZE: usize = 64;
+
+/// Flush cache lines covering `size` bytes starting at `addr` using pipelined
+/// clflushopt. Does NOT issue a fence — caller must follow with the
+/// appropriate fence (sfence for write path, mfence for read path).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub(crate) unsafe fn cache_flush_nofence(addr: *const u8, size: usize) {
+    let mut ptr = addr as usize;
+    let end = ptr + size;
+    while ptr < end {
+        core::arch::asm!("clflushopt [{}]", in(reg) ptr, options(nostack, preserves_flags));
+        ptr += CACHE_LINE_SIZE;
+    }
+}
+
+/// Flush + sfence: ensures writes are globally visible before subsequent stores.
+/// Use after write_volatile.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub(crate) unsafe fn cache_flush(addr: *const u8, size: usize) {
+    cache_flush_nofence(addr, size);
+    core::arch::x86_64::_mm_sfence();
+}
+
+/// Flush + mfence: ensures cache lines are evicted before subsequent loads.
+/// Use before read_volatile to guarantee reads come from memory.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub(crate) unsafe fn cache_flush_read(addr: *const u8, size: usize) {
+    cache_flush_nofence(addr, size);
+    core::arch::x86_64::_mm_mfence();
+}
+
+pub(crate) fn mem_write<T: Copy>(addr: *mut T, data: T) {
+    unsafe {
+        std::ptr::write_volatile(addr, data);
+        cache_flush(addr as *const u8, std::mem::size_of::<T>());
+    }
+}
+
+pub(crate) fn mem_read<T: Copy>(addr: *mut T) -> T {
+    unsafe {
+        cache_flush_read(addr as *const u8, std::mem::size_of::<T>());
+        std::ptr::read_volatile(addr)
+    }
+}
 
 #[derive(Debug)]
 pub struct MemoryError(pub usize);
@@ -48,9 +95,9 @@ pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEn
             return Err("Simulated write failure");
         }
     }
-    unsafe {
-        std::ptr::write(addr, data);
-    }
+
+    // mechanism to handle segfault here, signal catch plus backup process
+    mem_write(addr, data);
     Ok(())
 }
 
@@ -62,8 +109,9 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
             return Err("Simulated read failure");
         }
     }
+    // mechanism to handle segfault here, signal catch plus backup process
 
-    unsafe { Ok(std::ptr::read(addr)) }
+    Ok(mem_read(addr))
 }
 
 /// Read the value from all memory nodes for the given object

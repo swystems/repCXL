@@ -46,9 +46,9 @@
       async: true
       poll: 0
     
-    - name: wait for the coordinator to finish creating the objects.
-      pause:
-        seconds: 5
+    # - name: wait for the coordinator to finish creating the objects.
+    #   pause:
+    #     seconds: 5
 
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client replica
@@ -81,23 +81,24 @@
       delegate_to: localhost
       run_once: true
       shell: |
-        set -euo pipefail
         ts=$(date +"%Y%m%d_%H%M")
         output_file="{{ local_result_folder }}/bench_${ts}.txt"
         latest_file="{{ local_result_folder }}/bench_latest.txt"
 
         {
           echo "Date: ${ts}"
+          echo "YCSB workload: {{ ycsb_workload }}"
           echo ""
           echo "============= RepCXL configuration ============="
-          echo "File: {{ repcxl_config }}"
-          cat "{{ repcxl_config }}"
-          echo "============= YCSB workload ============="
-          echo "File: {{ ycsb_workload }}"
-          cat "ycsb/workloads/{{ ycsb_workload }}"
+          grep "processes =" {{ repcxl_config }}
+          grep "algorithm =" {{ repcxl_config }}
+          grep "round_time =" {{ repcxl_config }}
+          grep "read_retries =" {{ repcxl_config }}
+          grep "read_offset =" {{ repcxl_config }}
+          grep "core_affinity =" {{ repcxl_config }}
           echo "============= Benchmark Results ============="
           echo ""
-          cat "{{ local_result_folder }}"*.dat
+          {{local_repo}}/scripts/parse_bench.sh "{{ local_result_folder }}"*.dat
         } > "${output_file}"
 
         cp -f "${output_file}" "${latest_file}"

@@ -37,3 +37,6 @@ read_retries = {{ read_retries }}
 # CPU core to pin the repCXL write thread to (optional, default is None)
 core_affinity = 2 
 
+{% if read_offset is defined %}
+read_offset = {{ read_offset }}
+{% endif %}

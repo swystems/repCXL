@@ -51,10 +51,11 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
 }
 
 
-pub fn get_read_algorithm_client<T: Copy + PartialEq + std::fmt::Debug>(
+pub fn read_nothread<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: &String,
     start_instant: Instant,
     round_time: Duration,
+    read_offset: Option<f64>,
     group_view: &GroupView,
     obj: &RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
@@ -63,6 +64,7 @@ pub fn get_read_algorithm_client<T: Copy + PartialEq + std::fmt::Debug>(
         "monster" => monster::monster_read_client(
             start_instant, 
             round_time, 
+            read_offset,
             group_view, 
             obj),
         _ => panic!("Unknown algorithm, check config: {}", algorithm),

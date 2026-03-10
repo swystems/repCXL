@@ -220,15 +220,23 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Retries the operation up to `config.read_retries` times if it returns a
     /// dirty read.
     pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        let mut res = Err(String::from("Void read"));
-        // let mstate = self.get_state_from_master().unwrap();
-        // let start_time = mstate.get_starting_block().get_start_time().unwrap();
-
-        for _ in 0..=self.config.read_retries{
-            res = algorithms::get_read_algorithm_client(
+        
+        // attempt best effort read first
+        let mut res = algorithms::read_nothread(
                             &self.config.algorithm,
                             self.start_instant,
                             Duration::from_nanos(self.config.round_time),
+                            self.config.read_offset,
+                            &self.view, 
+                            obj);
+
+        // retry if dirty with offset time
+        for _ in 0..self.config.read_retries{
+            res = algorithms::read_nothread(
+                            &self.config.algorithm,
+                            self.start_instant,
+                            Duration::from_nanos(self.config.round_time),
+                            self.config.read_offset,
                             &self.view, 
                             obj); 
                 

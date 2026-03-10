@@ -53,7 +53,9 @@ struct MonsterStats {
     sync_failures: u64,
     empty_requests: u64,
     prev_round: u64,
-    rewrites: u64,
+    try_overtime: u64,
+    check_overtime: u64,
+    replicate_overtime: u64,
 }
 impl MonsterStats {
     fn new() -> Self {
@@ -62,7 +64,9 @@ impl MonsterStats {
             sync_failures: 0,
             empty_requests: 0,
             prev_round: 1,
-            rewrites: 0,
+            try_overtime: 0,
+            check_overtime: 0,
+            replicate_overtime: 0,
         }
     }
 
@@ -115,11 +119,13 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     loop {
         if stop_flag.load(Ordering::Relaxed) {
             monster_info!(monster_state, "Stop flag is set, exiting");
-            log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, rewrites={}", 
+            log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
                 stats.conflicts, 
                 stats.sync_failures, 
                 stats.empty_requests, 
-                stats.rewrites);
+                stats.try_overtime,
+                stats.check_overtime,
+                stats.replicate_overtime);
             break;
         }
 
@@ -168,6 +174,9 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                         }
                     }
                 }
+                if is_overtime(round_start, round_time) {
+                    stats.try_overtime += 1;
+                }
             },
 
             // Same as Try but don't fetch new request, use the pending one
@@ -190,17 +199,20 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                     // current process is the last writer
                     monster_info!(monster_state, "Process {} is the last writer for object {} in round {}", view.self_id, oid, round_num);
 
-                    if !is_overtime(round_start, round_time) {
+                    // if !is_overtime(round_start, round_time) {
                         // on time, proceed to Replicate state
                         monster_state = MonsterState::Replicate;
-                    } else {
-                        // overtime (sync failure), wait for next round
-                        monster_state = MonsterState::Check;
-                    }
+                    // } else {
+                    //     // overtime (sync failure), wait for next round
+                    //     monster_state = MonsterState::Check;
+                    // }
                 }
                 else {
                     // not the last writer
                     monster_state = MonsterState::Wait;
+                }
+                if is_overtime(round_start, round_time) {
+                    stats.check_overtime += 1;
                 }
             },
 
@@ -223,7 +235,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                 //     }
                 // }
 
-                for _ in 0..2 { // retry replication a few times if it fails, to handle transient failures
+                // for _ in 0..2 { // retry replication a few times if it fails, to handle transient failures
                     match mem_writeall(req.obj_info.offset, ome, &view.memory_nodes) {
                         Ok(()) => {
                             // send ack to client
@@ -238,13 +250,10 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                         }
                     }
 
-                    if !stats.update_sync_failure(round_num + 1) {
-                        break; // replication succeeded within the round, break out of retry loop
-                    } 
-                    else {
-                        stats.rewrites += 1;
+                    if is_overtime(round_start, round_time) {
+                        stats.replicate_overtime += 1;
                     }
-                }
+                // }
                 pending_req = None;
 
             },
@@ -363,14 +372,14 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
 pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
     start_instant: Instant,
     round_time: Duration,
+    read_offset: Option<f64>,
     view: &crate::GroupView,
     obj: &crate::RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
 
-    // let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
-    // let start_instant = system_time_to_instant(start_time);
-    // timer::wait_next_round(start_instant, round_time, timer::ROUND_SLEEP_RATIO);
-    timer::wait_round_progress(0.8, start_instant, round_time, timer::ROUND_SLEEP_RATIO);
+    if let Some(offset) = read_offset {
+        timer::wait_round_progress(offset, start_instant, round_time, timer::ROUND_SLEEP_RATIO);
+    }
 
     match mem_readends(obj.info.offset, &view.memory_nodes) {
         Ok(states) => {

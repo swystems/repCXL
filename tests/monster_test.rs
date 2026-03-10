@@ -2,7 +2,7 @@
 // causes e.g. expected conflict to not occur and similar unlucky events. Run with
 // at least 10ms round time or --test-threads=1 to reduce flakiness.
 use std::time::Duration;
-use rep_cxl::ReadReturn;
+use rep_cxl::request::ReadReturn;
 use rep_cxl::utils::ms_logger;
 
 mod test_utils;

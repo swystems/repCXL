@@ -33,3 +33,6 @@ read_retries = 7
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 1 
 
+# Read offset factor for the monster algorithm: every read operation waits until
+# x% of the round before reading. No wait if not specified 
+read_offset = 0.5

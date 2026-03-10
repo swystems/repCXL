@@ -15,6 +15,7 @@ const DEFAULT_PROCESSES: &[u32] = &[0]; // default to single process with ID 0
 const DEFAULT_ALGORITHM: &str = "monster";
 const DEFAULT_READ_RETRIES: usize = 0;
 const DEFAULT_CORE_AFFINITY: Option<usize> = None;
+const DEFAULT_READ_OFFSET: Option<f64> = None;
 
 
 
@@ -86,6 +87,7 @@ pub struct RepCXLConfig {
     pub processes: Vec<u32>,
     pub algorithm: String,
     pub read_retries: usize,
+    pub read_offset: Option<f64>,
     pub core_affinity: Option<usize>,
 }
 
@@ -101,6 +103,7 @@ impl Default for RepCXLConfig {
             processes: DEFAULT_PROCESSES.to_vec(), // default to single process with ID 0
             algorithm: DEFAULT_ALGORITHM.to_string(),
             read_retries: DEFAULT_READ_RETRIES,
+            read_offset: DEFAULT_READ_OFFSET,
             core_affinity: DEFAULT_CORE_AFFINITY,
         }
     }
