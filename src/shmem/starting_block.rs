@@ -1,4 +1,4 @@
-use crate::MAX_PROCESSES;
+use super::MAX_PROCESSES;
 use std::time::SystemTime;
 
 /// Shared fixed-size array indexed by process ID

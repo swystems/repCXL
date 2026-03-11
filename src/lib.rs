@@ -20,10 +20,6 @@ use shmem::{MemoryNode, SharedState};
 pub mod config;
 pub use config::RepCXLConfig;
 
-// Limits
-const MAX_PROCESSES: usize = 128; // Maximum number of processes
-pub const MAX_OBJECTS: usize = 1000; // Maximum number of objects
-
 
 /// The current membership of the group. Stores both the
 /// processes and the memory nodes present in the system at a given time.
@@ -320,7 +316,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// # Arguments
     /// * `id` - Unique identifier for the object.
     pub fn new_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
-        if self.num_of_objects >= MAX_OBJECTS {
+        if self.num_of_objects >= shmem::MAX_OBJECTS {
             warn!("Maximum number of objects reached");
             return None;
         }

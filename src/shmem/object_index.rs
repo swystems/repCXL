@@ -1,4 +1,4 @@
-use crate::MAX_OBJECTS;
+use super::MAX_OBJECTS;
 use log::{info, warn};
 
 #[derive(Debug, Clone, Copy)]

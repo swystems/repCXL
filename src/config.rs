@@ -4,6 +4,7 @@
 // the same set of parameters can be supplied via file instead of flags.
 
 use std::fs;
+use crate::shmem;
 use serde::{Deserialize, Deserializer};
 
 // default values for config parameters
@@ -137,8 +138,8 @@ impl RepCXLConfig {
         }
 
         // must have less than MAX_PROCESSES
-        if self.processes.len() > crate::MAX_PROCESSES as usize {
-            return Err(format!("{} Maximum number of processes: {}", err_prefix, crate::MAX_PROCESSES));
+        if self.processes.len() > shmem::MAX_PROCESSES as usize {
+            return Err(format!("{} Maximum number of processes: {}", err_prefix, shmem::MAX_PROCESSES));
         }
 
         // must specify at least one node

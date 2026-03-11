@@ -9,24 +9,28 @@
 
 use rand::Rng;
 use rand::prelude::IndexedRandom;  // Enables choose() on slices
-use crate::request::{Wid};
+use crate::request::Wid;
 use crate::shmem::MemoryNode;
 use log::error;
 
 const FAILURE_PROBABILITY: f32 = 0.0;
-const CACHE_LINE_SIZE: usize = 64;
+pub const CACHE_LINE_SIZE: usize = 64;
+
+pub(crate) unsafe fn clflushopt(addr: *const u8) {
+    core::arch::asm!("clflushopt [{}]", in(reg) addr, options(nostack, preserves_flags));
+}
 
 /// Flush cache lines covering `size` bytes starting at `addr` using pipelined
 /// clflushopt. Does NOT issue a fence — caller must follow with the
 /// appropriate fence (sfence for write path, mfence for read path).
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-pub(crate) unsafe fn cache_flush_nofence(addr: *const u8, size: usize) {
-    let mut ptr = addr as usize;
-    let end = ptr + size;
+pub(crate) unsafe fn clflushopt_range(addr: *const u8, size: usize) {
+    let end = addr.add(size);
+    let mut ptr = addr;
     while ptr < end {
-        core::arch::asm!("clflushopt [{}]", in(reg) ptr, options(nostack, preserves_flags));
-        ptr += CACHE_LINE_SIZE;
+        clflushopt(ptr);
+        ptr = ptr.add(CACHE_LINE_SIZE);
     }
 }
 
@@ -34,8 +38,8 @@ pub(crate) unsafe fn cache_flush_nofence(addr: *const u8, size: usize) {
 /// Use after write_volatile.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-pub(crate) unsafe fn cache_flush(addr: *const u8, size: usize) {
-    cache_flush_nofence(addr, size);
+pub(crate) unsafe fn cache_flush_fence(addr: *const u8, size: usize) {
+    clflushopt_range(addr, size);
     core::arch::x86_64::_mm_sfence();
 }
 
@@ -44,14 +48,14 @@ pub(crate) unsafe fn cache_flush(addr: *const u8, size: usize) {
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub(crate) unsafe fn cache_flush_read(addr: *const u8, size: usize) {
-    cache_flush_nofence(addr, size);
+    clflushopt_range(addr, size);
     core::arch::x86_64::_mm_mfence();
 }
 
 pub(crate) fn mem_write<T: Copy>(addr: *mut T, data: T) {
     unsafe {
         std::ptr::write_volatile(addr, data);
-        cache_flush(addr as *const u8, std::mem::size_of::<T>());
+        cache_flush_fence(addr as *const u8, std::mem::size_of::<T>());
     }
 }
 

@@ -2,6 +2,8 @@ use libc::{mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use std::fs::OpenOptions;
 use std::os::unix::io::AsRawFd;
 
+
+
 // currently not used, requires the libnuma
 // mod numa_mem_node;
 
@@ -12,6 +14,8 @@ use starting_block::StartingBlock;
 pub mod wcc;
 use wcc::ObjectWCC;
 
+pub const MAX_OBJECTS: usize = 1000; // Maximum number of objects
+pub const MAX_PROCESSES: usize = 512; // Maximum number of processes
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 
 #[derive(Debug, Clone, Copy)]
