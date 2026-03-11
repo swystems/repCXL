@@ -157,3 +157,21 @@ impl ObjectWCC {
         true
     }
 }
+
+
+pub struct FastWCC {
+    bitmaps: [u64; MAX_OBJECTS]
+}
+
+impl FastWCC {
+    fn new() -> Self {
+        FastWCC { bitmaps: [0; MAX_OBJECTS] }
+    }
+
+    pub fn write(&mut self, oid: usize, pid: usize) {
+        self.bitmaps[oid] += 2^pid as u64;
+// 
+    }
+
+    pub fn is_last() {}
+}
