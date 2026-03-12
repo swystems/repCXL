@@ -12,6 +12,8 @@ use rand::prelude::IndexedRandom;  // Enables choose() on slices
 use crate::request::Wid;
 use crate::shmem::MemoryNode;
 use log::error;
+use std::mem::size_of;
+use core::arch::x86_64::{_mm_mfence, _mm_sfence};
 
 const FAILURE_PROBABILITY: f32 = 0.0;
 pub const CACHE_LINE_SIZE: usize = 64;
@@ -42,7 +44,7 @@ pub(crate) unsafe fn clflushopt_range(addr: *const u8, size: usize) {
 #[inline(always)]
 pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
-    core::arch::x86_64::_mm_sfence();
+    _mm_sfence();
 }
 
 /// Flush + mfence: ensures cache lines are evicted before subsequent loads.
@@ -51,20 +53,13 @@ pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
 #[inline(always)]
 pub(crate) unsafe fn cache_flush_read(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
-    core::arch::x86_64::_mm_mfence();
+    _mm_mfence();
 }
 
-pub(crate) fn mem_write<T: Copy>(addr: *mut T, data: T) {
+pub(crate) fn mem_write_flush<T: Copy>(addr: *mut T, data: T) {
     unsafe {
         std::ptr::write_volatile(addr, data);
         cache_flush_write(addr as *const u8, std::mem::size_of::<T>());
-    }
-}
-
-pub(crate) fn mem_read<T: Copy>(addr: *mut T) -> T {
-    unsafe {
-        cache_flush_read(addr as *const u8, std::mem::size_of::<T>());
-        std::ptr::read_volatile(addr)
     }
 }
 
@@ -103,7 +98,7 @@ pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEn
     }
 
     // mechanism to handle segfault here, signal catch plus backup process
-    mem_write(addr, data);
+    unsafe { std::ptr::write_volatile(addr, data); }
     Ok(())
 }
 
@@ -117,7 +112,7 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
     }
     // mechanism to handle segfault here, signal catch plus backup process
 
-    Ok(mem_read(addr))
+    Ok(unsafe { std::ptr::read_volatile(addr) })
 }
 
 /// Read the value from all memory nodes for the given object
@@ -139,6 +134,7 @@ pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
 }
 
 /// Write the an ObjectMemoryEntry to all memory nodes at its given memory offset 
+/// Flush&fence to ensure visibility
 pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes: &Vec<MemoryNode>) -> Result<(), MemoryError> {
 
     // write data to all memory nodes
@@ -151,7 +147,12 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
             );
             return Err(MemoryError(node.id));
         }
+        // flush
+        unsafe { clflushopt_range(addr  as *const u8, size_of::<ObjectMemoryEntry<T>>()); }
     }
+
+    // fence once only after all writes to all mem nodes are flushed
+    unsafe { _mm_mfence(); }
 
     Ok(())
 }
@@ -184,7 +185,20 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
     
     // read the first node
     let first_node = &mem_nodes[0];
-    let addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    let last_node = &mem_nodes[mem_nodes.len() - 1];
+
+    // flush nodes
+    let nodes = [first_node, last_node];
+    for node in nodes {
+        let addr = node.addr_at(offset);
+        unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
+    }
+
+    unsafe { _mm_mfence(); }
+
+    // now read both from memory
+     
+    let mut addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
     let first = match safe_read(addr) {
         Ok(data) => data,
         Err(e) => {
@@ -197,8 +211,7 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
     };
     
     // read the last node
-    let last_node = &mem_nodes[mem_nodes.len() - 1];
-    let addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
     let last = match safe_read(addr) {
         Ok(data) => data,
         Err(e) => {

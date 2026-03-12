@@ -48,7 +48,7 @@ fn main() {
     let load_trace = extra_args.get_one::<String>("load_trace").unwrap();
     let run_trace = extra_args.get_one::<String>("run_trace").unwrap();
 
-    let workload = load_ycsb_workload(load_trace, run_trace);
+    let mut workload = load_ycsb_workload(load_trace, run_trace);
     // workload.summary();
 
     debug!("First 5 load operations:");
@@ -137,11 +137,26 @@ fn main() {
     let mut dirty_reads = 0;
     let mut safe_reads = 0;
 
-    info!("Executing YCSB run phase...");
-    let start_total = std::time::Instant::now();
+    // use up to 10k operations as warmup by prepending them to the run sequence
+    // append the warmup ops at the end so that they are still executed as part
+    // of the benchmark
+    let warmup_len = workload.run_ops.len().min(10_000);
+    workload.run_ops.extend_from_within(0..warmup_len);
 
-    // for op 
+
+    
+
+    info!("Executing YCSB run phase...");
+    let mut start_total = std::time::Instant::now();
+    let mut op_num = 0;
     for op in &workload.run_ops {
+        
+        if op_num == warmup_len {
+            info!("Warmup phase complete. Starting timed benchmark...");
+            start_total = std::time::Instant::now();
+        }
+        op_num += 1;
+        
         match op.op_type {
             rep_cxl::utils::ycsb::OpType::Read => {
                 let obj = index.get(&op.key).expect("Key not found in index");

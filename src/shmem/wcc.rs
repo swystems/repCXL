@@ -119,7 +119,7 @@ impl ObjectWCC {
             return; // invalid pid
         }
         let entry = ObjectWCCEntry::new(oid, round);
-        safe_memio::mem_write(&mut self.p_round[pid], entry);
+        safe_memio::mem_write_flush(&mut self.p_round[pid], entry);
     }
 
     /// Check if the given process is the last writer for the given object.
