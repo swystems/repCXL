@@ -18,7 +18,7 @@ const CACHE_LINE_SIZE: usize = 64;
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-unsafe fn cache_flush_fence(addr: *const u8, size: usize) {
+unsafe fn cache_flush_write(addr: *const u8, size: usize) {
     let mut ptr = addr as usize;
     let end = ptr + size;
     while ptr < end {
@@ -43,7 +43,7 @@ unsafe fn write_volatile_flush(addr: *mut u8, val: u8, size: usize) {
     for off in (0..size).step_by(CACHE_LINE_SIZE) {
         std::ptr::write_volatile(addr.add(off), val);
     }
-    cache_flush_fence(addr, size);
+    cache_flush_write(addr, size);
 }
 
 #[inline(always)]
@@ -66,7 +66,7 @@ unsafe fn read_volatile_only(addr: *mut u8, size: usize) -> u8 {
 
 #[inline(always)]
 unsafe fn read_flush_volatile(addr: *mut u8, size: usize) -> u8 {
-    cache_flush_fence(addr, size);
+    cache_flush_write(addr, size);
     let mut v = 0u8;
     for off in (0..size).step_by(CACHE_LINE_SIZE) {
         v = std::ptr::read_volatile(addr.add(off));

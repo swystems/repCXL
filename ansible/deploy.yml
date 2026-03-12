@@ -21,3 +21,11 @@
           - "--exclude=jupyter/"
           - "--exclude=test/"
           - "--exclude=ansible/"
+
+    - name: build repCXL client
+      shell: |
+        source $HOME/.cargo/env
+        cargo build --release --bin ycsb_client
+      args: 
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"

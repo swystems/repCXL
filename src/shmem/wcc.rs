@@ -3,7 +3,6 @@ use core::panic;
 
 use super::{MAX_OBJECTS, MAX_PROCESSES};
 use crate::safe_memio;
-use crate::safe_memio::{CACHE_LINE_SIZE,clflushopt};
 
 /// Write Conflict Checker (WCC) register to solve write conflicts
 #[derive(Debug, Clone, Copy)]
@@ -164,30 +163,48 @@ impl ObjectWCC {
 /// Bitmap to track processes that have written to an object for FastWCC implementation.
 /// Assumes cache line of 64bytes, uses u64 + flush + mfence to ensure visibility
 /// of CXL 2.0 read/writes across hosts.
+/// 
+/// Fields:
+/// - data: bitmap as u64 array
+/// - size: size of the bitmap in bytes
 #[cfg(target_arch = "x86_64")]
 #[derive(Debug, Clone, Copy)]
 struct ProcessBitmapUncached {
-    data: [u64; MAX_PROCESSES / CACHE_LINE_SIZE],
+    data: [u64; MAX_PROCESSES.div_ceil(64)],
+    size: usize,
 }
 
 impl ProcessBitmapUncached {
     fn new() -> Self {
-        ProcessBitmapUncached { data: [0; MAX_PROCESSES / CACHE_LINE_SIZE] }
+        let size = MAX_PROCESSES.div_ceil(64) * 8; // size in bytes
+        ProcessBitmapUncached { data: [0; MAX_PROCESSES.div_ceil(64)], size }
+    }
+    
+    /// Cache flush the bitmap to ensure write is committed to memory
+    unsafe fn cfw(&self) {
+        // safe_memio::cache_flush_write(self.data.as_ptr() as *const u8, self.size);
     }
 
-    fn set(&mut self, pid: usize) {
-        let byte_index = pid / CACHE_LINE_SIZE;
-        let bit_index = pid % CACHE_LINE_SIZE;
-        self.data[byte_index] |= 1 << bit_index;
-        unsafe {
-            clflushopt(self.data[byte_index] as *const u8);
-            core::arch::x86_64::_mm_sfence();
+    /// Cache flush the bitmap (=cache invalidate) to ensure subsequent read from memory
+    unsafe fn cfr(&self) {
+        // safe_memio::cache_flush_read(self.data.as_ptr() as *const u8, self.size);
+    }
+
+    fn set(&mut self, pid: usize, val: bool) {
+        let byte_index = pid / 64;
+        let bit_index = pid % 64;
+        if val {
+            self.data[byte_index] |= 1 << bit_index;
+        } else {
+            self.data[byte_index] &= !(1 << bit_index);
         }
     }
 
+
     fn is_smallest(&self, pid: usize) -> bool {
-        let byte_index = pid / CACHE_LINE_SIZE;
-        let bit_index = pid % CACHE_LINE_SIZE;
+        let byte_index = pid / 64;
+        let bit_index = pid % 64;
+
         // Check if any lower bit is set
         for i in 0..byte_index {
             if self.data[i] != 0 {
@@ -199,30 +216,76 @@ impl ProcessBitmapUncached {
         (self.data[byte_index] & mask) == 0
     }
 
+    fn smallest(&self) -> Option<usize> {
+        for word_index in 0..self.data.len() {
+            let word = self.data[word_index];
+            if word != 0 {
+                let bit = word.trailing_zeros() as usize;
+                return Some(word_index * 64 + bit);
+            }
+        }
+        None
+    }
+
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct FastWCC {
     obm: [ProcessBitmapUncached; MAX_OBJECTS] // object bitmaps
 }
 
 impl FastWCC {
-    fn new() -> Self {
+    pub fn new() -> Self {
         FastWCC { obm: [ProcessBitmapUncached::new(); MAX_OBJECTS] }
     }
 
+    /// Mark the process as a writer for the given object.
     pub fn write(&mut self, oid: usize, pid: usize) {
         if oid >= MAX_OBJECTS || pid >= MAX_PROCESSES {
             panic!("Invalid object ID or process ID");
         }
-        self.obm[oid].set(pid);
+        self.obm[oid].set(pid, true);
+        unsafe { self.obm[oid].cfw(); }
     }
 
+
+    /// Mark the process as a writer for the given object.
+    pub fn replace(&mut self, oid: usize, pid_set: usize, pid_unset: usize) {
+        if oid >= MAX_OBJECTS || pid_set >= MAX_PROCESSES || pid_unset >= MAX_PROCESSES {
+            panic!("Invalid object ID or process ID");
+        }
+        self.obm[oid].set(pid_set, true);
+        self.obm[oid].set(pid_unset, false);
+        unsafe { self.obm[oid].cfw(); }
+    }
+
+    /// Remove the process from the WCC to allow new writers in the next round`
+    pub fn clear(&mut self, oid: usize, pid: usize) {
+        if oid >= MAX_OBJECTS || pid >= MAX_PROCESSES {
+            panic!("Invalid object ID or process ID");
+        }
+        self.obm[oid].set(pid, false);
+        unsafe { self.obm[oid].cfw(); } 
+    }
+
+    /// Check if the given process is the last writer for the given object.
     pub fn is_last(&mut self, oid: usize, pid: usize) -> bool {
         if oid >= MAX_OBJECTS || pid >= MAX_PROCESSES {
             panic!("Invalid object ID or process ID");
         }
-        
+
+        unsafe { self.obm[oid].cfr(); }    
         // Check if any other process has written to the same object
         self.obm[oid].is_smallest(pid)
+    }
+
+    /// Return the last process ID that wrote to the object.
+    pub fn last(&mut self, oid: usize) -> Option<usize> {
+        if oid >= MAX_OBJECTS {
+            panic!("Invalid object ID");
+        }
+        
+        unsafe { self.obm[oid].cfr(); }   
+        self.obm[oid].smallest()
     }
 }

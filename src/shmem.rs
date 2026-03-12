@@ -12,7 +12,7 @@ use object_index::ObjectIndex;
 mod starting_block;
 use starting_block::StartingBlock;
 pub mod wcc;
-use wcc::ObjectWCC;
+use wcc::{ObjectWCC, FastWCC};
 
 pub const MAX_OBJECTS: usize = 1000; // Maximum number of objects
 pub const MAX_PROCESSES: usize = 512; // Maximum number of processes
@@ -23,6 +23,7 @@ pub(crate) struct SharedState {
     pub(crate) object_index: ObjectIndex,
     starting_block: StartingBlock,
     owcc: ObjectWCC,
+    fwcc: FastWCC,
 }
 
 impl SharedState {
@@ -31,6 +32,7 @@ impl SharedState {
             object_index: ObjectIndex::new(total_size, chunk_size),
             starting_block: StartingBlock::new(),
             owcc: ObjectWCC::new(),
+            fwcc: FastWCC::new(),
         }
     }
 
@@ -40,6 +42,10 @@ impl SharedState {
 
     pub(crate) fn get_owcc(&mut self) -> &mut ObjectWCC {
         &mut self.owcc
+    }
+
+    pub(crate) fn get_fwcc(&mut self) -> &mut FastWCC  {
+        &mut self.fwcc
     }
 }
 
@@ -60,10 +66,11 @@ impl MemoryNode {
     // assumes all processes/VMs use the same file path
     pub(crate) fn from_file(id: usize, path: &str, size: usize) -> Self {
         if size <= STATE_SIZE {
-            panic!("Size must be greater than SharedState size:\n\tObjectIndex: {}\n\tstarting_block: {}\n\twcc_mo: {}", 
+            panic!("Size must be greater than SharedState size:\n\tObjectIndex: {}\n\tstarting_block: {}\n\towcc: {}\n\tfwcc: {}", 
                 std::mem::size_of::<ObjectIndex>(), 
                 std::mem::size_of::<StartingBlock>(), 
-                std::mem::size_of::<ObjectWCC>()
+                std::mem::size_of::<ObjectWCC>(),
+                std::mem::size_of::<FastWCC>()
             );
         }
 

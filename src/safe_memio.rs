@@ -16,6 +16,8 @@ use log::error;
 const FAILURE_PROBABILITY: f32 = 0.0;
 pub const CACHE_LINE_SIZE: usize = 64;
 
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
 pub(crate) unsafe fn clflushopt(addr: *const u8) {
     core::arch::asm!("clflushopt [{}]", in(reg) addr, options(nostack, preserves_flags));
 }
@@ -38,7 +40,7 @@ pub(crate) unsafe fn clflushopt_range(addr: *const u8, size: usize) {
 /// Use after write_volatile.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-pub(crate) unsafe fn cache_flush_fence(addr: *const u8, size: usize) {
+pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
     core::arch::x86_64::_mm_sfence();
 }
@@ -55,7 +57,7 @@ pub(crate) unsafe fn cache_flush_read(addr: *const u8, size: usize) {
 pub(crate) fn mem_write<T: Copy>(addr: *mut T, data: T) {
     unsafe {
         std::ptr::write_volatile(addr, data);
-        cache_flush_fence(addr as *const u8, std::mem::size_of::<T>());
+        cache_flush_write(addr as *const u8, std::mem::size_of::<T>());
     }
 }
 

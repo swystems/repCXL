@@ -139,6 +139,8 @@ fn main() {
 
     info!("Executing YCSB run phase...");
     let start_total = std::time::Instant::now();
+
+    // for op 
     for op in &workload.run_ops {
         match op.op_type {
             rep_cxl::utils::ycsb::OpType::Read => {

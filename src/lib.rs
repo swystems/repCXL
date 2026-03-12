@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, Instant};
 mod algorithms;
 mod safe_memio;
 use safe_memio::ObjectMemoryEntry;
-mod shmem;
+pub mod shmem;
 mod timer;
 pub mod utils;
 pub mod request;
@@ -188,30 +188,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
     }
 
-    pub fn tmp_read(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        match safe_memio::mem_readall(obj.info.offset, &self.view.memory_nodes) {
-        Ok(states) => {
-                // check if all states are consistent (have the same wid (i.e. value))
-                // and get the latest wid with one pass
-                // println!("{:?}", states);
-                let (consistent, latest) = states.iter().skip(1).fold(
-                    (true, &states[0]),
-                    |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
-                );
-                // return based on consistency
-                if consistent {
-                    return Ok(ReadReturn::ReadSafe(latest.value));
-                } else {
-                    return Ok(ReadReturn::ReadDirty(latest.value));
-                };
-            },
-            Err(safe_memio::MemoryError(memory_node_id)) => {
-                Err(format!("Memory node {} failed during read", memory_node_id))
-            }
-        }
-
-    }
-
     /// Use the config-specified read algorithm to read an object. 
     /// Retries the operation up to `config.read_retries` times if it returns a
     /// dirty read.
@@ -318,6 +294,13 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn new_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
         if self.num_of_objects >= shmem::MAX_OBJECTS {
             warn!("Maximum number of objects reached");
+            return None;
+        }
+
+
+        // TODO: do it more cleanly
+        if id >= shmem::MAX_OBJECTS {
+            warn!("Allowed IDs: 0-{}", shmem::MAX_OBJECTS - 1);
             return None;
         }
 

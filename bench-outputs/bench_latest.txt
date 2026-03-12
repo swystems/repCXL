@@ -1,4 +1,4 @@
-Date: 20260310_1826
+Date: 20260312_1843
 YCSB workload: workloada_64_large
 
 ============= RepCXL configuration =============
@@ -10,34 +10,34 @@ core_affinity = 2
 ============= Benchmark Results =============
 
 === vm0.dat ===
-Monster: conflicts=0, sync_failures=5238, empty_requests=875749, try_overtime=926, check_overtime=1893, replicate_overtime=1380
-Ops: 2000000  Time: 7.81s  Throughput: 256220.67 ops/sec
-Dirty reads: 123 / 998989 (0.012%)
+Monster: conflicts=0, sync_failures=401354, empty_requests=869205, try_overtime=872, check_overtime=368736, replicate_overtime=1366
+Ops: 2000000  Time: 8.60s  Throughput: 232658.14 ops/sec
+Dirty reads: 155 / 999367 (0.016%)
                  avg       P99.99         P100
-Read         1.21μs      8.12μs    104.70μs
-Write         6.33μs     15.05μs       1.13ms
+Read         1.23μs      8.18μs     97.51μs
+Write         7.12μs     88.11μs       1.27ms
 
 === vm1.dat ===
-Monster: conflicts=0, sync_failures=6006, empty_requests=857188, try_overtime=722, check_overtime=2692, replicate_overtime=1327
-Ops: 2000000  Time: 8.04s  Throughput: 248870.10 ops/sec
-Dirty reads: 132 / 1000812 (0.013%)
+Monster: conflicts=0, sync_failures=341629, empty_requests=859691, try_overtime=827, check_overtime=310644, replicate_overtime=1334
+Ops: 2000000  Time: 8.75s  Throughput: 228557.44 ops/sec
+Dirty reads: 166 / 999172 (0.017%)
                  avg       P99.99         P100
-Read         1.21μs      7.93μs     55.25μs
-Write         6.58μs     14.52μs     309.19ms
+Read         1.22μs      7.96μs    796.85μs
+Write         7.26μs     84.52μs     328.52ms
 
 === vm2.dat ===
-Monster: conflicts=0, sync_failures=4431, empty_requests=616984, try_overtime=808, check_overtime=1702, replicate_overtime=1048
-Ops: 2000000  Time: 7.69s  Throughput: 260060.52 ops/sec
-Dirty reads: 136 / 999909 (0.014%)
+Monster: conflicts=0, sync_failures=309624, empty_requests=646151, try_overtime=800, check_overtime=284326, replicate_overtime=951
+Ops: 2000000  Time: 8.19s  Throughput: 244106.77 ops/sec
+Dirty reads: 168 / 1000140 (0.017%)
                  avg       P99.99         P100
-Read           910ns      7.73μs     14.43μs
-Write         6.52μs     13.54μs     442.48ms
+Read           943ns      7.93μs     50.23μs
+Write         6.99μs     85.09μs     267.29ms
 
 === vm3.dat ===
-Monster: conflicts=0, sync_failures=4615, empty_requests=640592, try_overtime=652, check_overtime=2019, replicate_overtime=1005
-Ops: 2000000  Time: 7.28s  Throughput: 274885.15 ops/sec
-Dirty reads: 159 / 998479 (0.016%)
+Monster: conflicts=0, sync_failures=331350, empty_requests=674234, try_overtime=813, check_overtime=305047, replicate_overtime=1010
+Ops: 2000000  Time: 8.00s  Throughput: 250062.13 ops/sec
+Dirty reads: 146 / 999749 (0.015%)
                  avg       P99.99         P100
-Read           913ns      7.93μs     86.61μs
-Write         6.10μs     17.40μs    821.17μs
+Read           956ns      7.64μs     13.67μs
+Write         6.78μs     86.62μs    489.33μs
 

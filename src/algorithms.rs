@@ -27,6 +27,7 @@ pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
         "async_best_effort" => best_effort::async_best_effort_write,
         "sync_best_effort" => best_effort::sync_best_effort,
         "monster" => monster::monster_write,
+        "fmonster" => monster::fmonster_write,
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }
@@ -46,7 +47,8 @@ pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_read,
         "monster" => monster::monster_read,
-        _ => panic!("Unknown algorithm, check config: {}", algorithm),
+        "fmonster" => monster::monster_read,
+        _ => panic!("Unknown read algorithm, check config: {}", algorithm),
     }
 }
 
@@ -61,12 +63,12 @@ pub fn read_nothread<T: Copy + PartialEq + std::fmt::Debug>(
 ) -> Result<ReadReturn<T>, String> {
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_read_client(group_view, obj),
-        "monster" => monster::monster_read_client(
+        "monster" | "fmonster" => monster::monster_read_client(
             start_instant, 
             round_time, 
             read_offset,
             group_view, 
             obj),
-        _ => panic!("Unknown algorithm, check config: {}", algorithm),
+        _ => panic!("Unknown read algorithm, check config: {}", algorithm),
     }
 }
