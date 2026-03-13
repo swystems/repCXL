@@ -46,9 +46,9 @@
       async: true
       poll: 0
     
-    # - name: wait for the coordinator to finish creating the objects.
-    #   pause:
-    #     seconds: 5
+    - name: wait for the coordinator to finish creating the objects.
+      pause:
+        seconds: 30
 
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client replica
