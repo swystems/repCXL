@@ -1,0 +1,43 @@
+Date: 20260312_1933
+YCSB workload: workloada_64_large
+
+============= RepCXL configuration =============
+processes = [0, 1, 2, 3]
+algorithm = "fmonster"
+round_time = 1000 
+read_retries = 0
+core_affinity = 2 
+============= Benchmark Results =============
+
+=== vm0.dat ===
+Monster: conflicts=2, sync_failures=85634, empty_requests=1978770, try_overtime=2310, check_overtime=233, replicate_overtime=48600
+Ops: 2010000  Time: 5.05s  Throughput: 397701.01 ops/sec
+Dirty reads: 124 / 1006013 (0.012%)
+                 avg       P99.99         P100
+Read           969ns      7.36μs     32.97μs
+Write         3.83μs     12.06μs    745.02μs
+
+=== vm1.dat ===
+Monster: conflicts=522, sync_failures=78010, empty_requests=1948097, try_overtime=850, check_overtime=211, replicate_overtime=39548
+Ops: 2010000  Time: 5.17s  Throughput: 389108.00 ops/sec
+Dirty reads: 137 / 1005424 (0.014%)
+                 avg       P99.99         P100
+Read           957ns      7.83μs    348.38μs
+Write         4.35μs       1.12ms     400.09ms
+
+=== vm2.dat ===
+Monster: conflicts=1491, sync_failures=43677, empty_requests=1613532, try_overtime=3526, check_overtime=207, replicate_overtime=15729
+Ops: 2010000  Time: 4.66s  Throughput: 431613.84 ops/sec
+Dirty reads: 189 / 1005111 (0.019%)
+                 avg       P99.99         P100
+Read           727ns      7.61μs     47.10μs
+Write         3.90μs     11.68μs     239.43ms
+
+=== vm3.dat ===
+Monster: conflicts=2414, sync_failures=38357, empty_requests=1730534, try_overtime=2273, check_overtime=218, replicate_overtime=14806
+Ops: 2010000  Time: 4.70s  Throughput: 427978.45 ops/sec
+Dirty reads: 162 / 1004925 (0.016%)
+                 avg       P99.99         P100
+Read           732ns      7.77μs     51.09μs
+Write         3.70μs     14.49μs    841.92μs
+

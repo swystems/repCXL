@@ -450,11 +450,9 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
                         // WCC and 
                         // - might have replicated instead
                         // - might have crashed 
-                        // in any case no other process is queueing and no
-                        // reader can see our write (no linearization break)  
-                        // so we can replicate 
+                        // go to post-conflict check to find out
                         monster_info!(monster_state, "No last writer!");
-                        monster_state = MonsterState::Replicate;
+                        monster_state = MonsterState::PostConflictCheck;
                     }
                 }
 
