@@ -148,11 +148,11 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
             return Err(MemoryError(node.id));
         }
         // flush
-        unsafe { clflushopt_range(addr  as *const u8, size_of::<ObjectMemoryEntry<T>>()); }
+        // unsafe { clflushopt_range(addr  as *const u8, size_of::<ObjectMemoryEntry<T>>()); }
     }
 
     // fence once only after all writes to all mem nodes are flushed
-    unsafe { _mm_mfence(); }
+    // unsafe { _mm_mfence(); }
 
     Ok(())
 }
@@ -187,14 +187,14 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
     let first_node = &mem_nodes[0];
     let last_node = &mem_nodes[mem_nodes.len() - 1];
 
-    // flush nodes
-    let nodes = [first_node, last_node];
-    for node in nodes {
-        let addr = node.addr_at(offset);
-        unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
-    }
+    // // flush nodes
+    // let nodes = [first_node, last_node];
+    // for node in nodes {
+    //     let addr = node.addr_at(offset);
+    //     unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
+    // }
 
-    unsafe { _mm_mfence(); }
+    // unsafe { _mm_mfence(); }
 
     // now read both from memory
      
