@@ -180,7 +180,7 @@ fn main() {
 
                 if let Some(obj) = index.get(&op.key) {
                     let start = std::time::Instant::now();
-                    if let Err(e) = obj.write(value) {
+                    if let Err(e) = rcxl.write_object(obj, value) {
                         error!("write error for object {}: {}", op.key, e);
                         write_errors += 1;
                     }
