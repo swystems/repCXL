@@ -35,14 +35,14 @@
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client coordinator
       shell: |
-        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
-          && echo "$output" | tee bench_out{{ vm_id }}.dat \
+        output=$(scripts/run_ycsb_client.sh {{ repcxl_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
+          && echo "$output" | tee bench_out{{ repcxl_id }}.dat \
           || { echo "$output" >&2; exit 1; }
       args:
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
       become: true
-      when: repcxl_coordinator_id == vm_id
+      when: repcxl_coordinator_id == repcxl_id
       async: true
       poll: 0
     
@@ -53,14 +53,14 @@
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client replica
       shell: |
-        output=$(scripts/run_ycsb_client.sh {{ vm_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
-          && echo "$output" | tee bench_out{{ vm_id }}.dat \
+        output=$(scripts/run_ycsb_client.sh {{ repcxl_id }} {{ ycsb_workload }} {{ repcxl_config }} 2>&1) \
+          && echo "$output" | tee bench_out{{ repcxl_id }}.dat \
           || { echo "$output" >&2; exit 1; }
       args:
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
       become: true
-      when: repcxl_coordinator_id != vm_id
+      when: repcxl_coordinator_id != repcxl_id
       
 
     - name: ensure local output directory exists
@@ -73,7 +73,7 @@
 
     - name: fetch bench_out.dat from remote hosts
       fetch:
-        src: "{{ remote_dir }}/bench_out{{ vm_id }}.dat"
+        src: "{{ remote_dir }}/bench_out{{ repcxl_id }}.dat"
         dest: "{{ local_result_folder }}/{{ inventory_hostname }}.dat"
         flat: yes
 

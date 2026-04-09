@@ -25,7 +25,7 @@
     - name: build repCXL client
       shell: |
         source $HOME/.cargo/env
-        cargo build --release --bin ycsb_client
+        cargo build --release
       args: 
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
