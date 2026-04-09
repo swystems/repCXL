@@ -12,7 +12,6 @@ use rand::prelude::IndexedRandom;  // Enables choose() on slices
 use crate::request::Wid;
 use crate::shmem::MemoryNode;
 use log::error;
-use std::mem::size_of;
 use core::arch::x86_64::{_mm_mfence, _mm_sfence};
 
 const FAILURE_PROBABILITY: f32 = 0.0;
@@ -148,11 +147,11 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
             return Err(MemoryError(node.id));
         }
         // flush
-        // unsafe { clflushopt_range(addr  as *const u8, size_of::<ObjectMemoryEntry<T>>()); }
+        unsafe { clflushopt_range(addr  as *const u8, size_of::<ObjectMemoryEntry<T>>()); }
     }
 
     // fence once only after all writes to all mem nodes are flushed
-    // unsafe { _mm_mfence(); }
+    unsafe { _mm_mfence(); }
 
     Ok(())
 }
@@ -183,22 +182,22 @@ pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resul
 /// scalability improvements
 pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
     
-    // read the first node
     let first_node = &mem_nodes[0];
     let last_node = &mem_nodes[mem_nodes.len() - 1];
 
-    // // flush nodes
-    // let nodes = [first_node, last_node];
-    // for node in nodes {
-    //     let addr = node.addr_at(offset);
-    //     unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
-    // }
+    // flush nodes
+    for node in [first_node, last_node] {
+        let addr = node.addr_at(offset);
+        unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
+    }
+    // wait for flush to complete before reading
+    unsafe { _mm_mfence(); }
 
-    // unsafe { _mm_mfence(); }
+    let start = std::time::Instant::now(); // debug read times
 
-    // now read both from memory
-     
+    // now read both from memory    
     let mut addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    let debug_step1 = start.elapsed().as_nanos(); // debug read times
     let first = match safe_read(addr) {
         Ok(data) => data,
         Err(e) => {
@@ -209,6 +208,8 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
             return Err(MemoryError(first_node.id));
         }
     };
+
+    let debug_step2 = start.elapsed().as_nanos(); // debug read times
     
     // read the last node
     addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
@@ -222,6 +223,14 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
             return Err(MemoryError(last_node.id));
         }
     };
+    let debug_step3 = start.elapsed().as_nanos(); // debug read times
+    
+    log::debug!("write_size: {}B, step 1: {} step2: {}, step3: {}", 
+        size_of::<ObjectMemoryEntry<T>>(), 
+        debug_step1, 
+        debug_step2-debug_step1, 
+        debug_step3 - debug_step2);
+
 
     Ok([first, last])
 }

@@ -144,7 +144,6 @@ fn main() {
     workload.run_ops.extend_from_within(0..warmup_len);
 
 
-    
 
     info!("Executing YCSB run phase...");
     let mut start_total = std::time::Instant::now();
@@ -180,7 +179,7 @@ fn main() {
 
                 if let Some(obj) = index.get(&op.key) {
                     let start = std::time::Instant::now();
-                    if let Err(e) = rcxl.write_object(obj, value) {
+                    if let Err(e) = obj.write(value) {
                         error!("write error for object {}: {}", op.key, e);
                         write_errors += 1;
                     }
