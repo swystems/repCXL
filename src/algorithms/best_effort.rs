@@ -1,18 +1,36 @@
-use std::time::{Duration, SystemTime, Instant};
+use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use log::{info,error,debug};
 use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
-use crate::safe_memio::{safe_write, mem_readall, mem_writeall, mem_readends, MemoryError};
-use crate::{GroupView, WriteRequest};
+use crate::safe_memio::{mem_writeall, mem_readends, MemoryError};
+use crate::{GroupView, WriteRequest, ReadRequest};
 use crate::timer;
-use super::ReadAlgorithmContext;
+use super::AlgorithmContext;
 
 const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
 
 
+
+/// Client-writer: clients perform write operation directly i.e. no write
+/// thread request handling.
 pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
+    view: &crate::GroupView,
+    obj_info: &crate::ObjectInfo,
+    data: T,
+) -> Result<(), String> {
+    let entry = ObjectMemoryEntry::new_nowid(data);
+    match mem_writeall(obj_info.offset, entry, &view.memory_nodes) {
+        Ok(()) => Ok(()),
+        Err(MemoryError(memory_node_id)) => {
+            Err(format!("Memory node {} failed during write", memory_node_id))
+        }
+    }
+}
+
+
+pub fn async_best_effort_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
     view: GroupView,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
@@ -25,37 +43,38 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
 
         match req_queue_rx.recv() {
             Ok(req) => {
-                let trace_id = req.trace_id;
-                let queue_wait = req.enqueue_at.elapsed();
-                let write_start = Instant::now();
+                
+                let trace_id = req.trace_id; //debug
+                let queue_wait = req.enqueue_at.elapsed(); //debug
+                let write_start = Instant::now(); //debug
 
                 // write data to all memory nodes
                 let (oi, data, ack_tx) = req.to_tuple();
-                for node in &view.memory_nodes {
-                    let addr = node.addr_at(oi.offset) as *mut ObjectMemoryEntry<T>;
-                    let entry = ObjectMemoryEntry::new_nowid(data);
-                    safe_write(addr, entry).unwrap_or_else(|e| {
-                        error!(
-                            "Safe write failed at node {} offset {}: {}",
-                            node.id, oi.offset, e
-                        );
-                    });
+                match async_best_effort_write(&view, &oi, data) {
+                    Ok(()) => {
+                        let replicate_time = write_start.elapsed(); //debug
+
+                        // send ack to client
+                        if let Err(e) = ack_tx.send(true) {
+                            error!("Failed to send ack: {}", e);
+                        }
+
+                        if trace_id % WRITE_TRACE_SAMPLE_RATE == 0 {
+                            debug!(
+                                "[WRITE_TRACE][worker] id={} queue_wait={}ns replicate={}ns",
+                                trace_id,
+                                queue_wait.as_nanos(),
+                                replicate_time.as_nanos(),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to write object: {}", e);
+                        continue;
+                    }
                 }
 
-                let replicate_time = write_start.elapsed();
-
-                if let Err(e) = ack_tx.send(true) {
-                        error!("Failed to send ack: {}", e);
-                }
-
-                if trace_id % WRITE_TRACE_SAMPLE_RATE == 0 {
-                    debug!(
-                        "[WRITE_TRACE][worker] id={} queue_wait={}ns replicate={}ns",
-                        trace_id,
-                        queue_wait.as_nanos(),
-                        replicate_time.as_nanos(),
-                    );
-                }
+                
             },
             Err(e) => {
                 info!("Object queue channel closed: {}", e);
@@ -65,70 +84,15 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     }
 }
 
-/// Thread-reader: process read requests from repCXL object channels and sends
-/// ReadReturn. inter-thread communication might lead to overhead, prefer 
-/// _client version for better latency  
-pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(ractx: ReadAlgorithmContext<T>,) {
-    let view = ractx.group_view;
-    loop {
-        if ractx.stop_flag.load(Ordering::Relaxed) {
-            break;
-        }
-        match ractx.req_queue_rx.recv() {
-            Ok(req) => {
-                match mem_readall(req.obj_info.offset, &view.memory_nodes) {
-                    Ok(states) => {
-                        // check if all states are consistent by VALUE since best effort does not use WID
-
-                        let consistent = states.iter().all(|s| s.value == states[0].value);
-                        // return based on consistency
-                        let result = if consistent {
-                            ReadReturn::ReadSafe(states[0].value)
-                        } else {
-                            ReadReturn::ReadDirty(states[0].value)
-                        };
-                        if let Err(e) = req.ack_tx.send(result) {
-                            error!("Failed to send read response: {}", e);
-                        }
-                    },
-                    Err(MemoryError(memory_node_id)) => {
-                        error!("Memory node {} failed during read", memory_node_id);
-                    }
-                }
-            },
-            Err(e) => {
-                log::info!("[READ] Read request channel closed: {}", e);
-                break; // exit thread
-            }
-        }
-    }
-}
-
-
-/// Client-writer: clients perform write operation directly i.e. no write
-/// thread request handling.
-pub fn async_best_effort_write_client<T: Copy + PartialEq + std::fmt::Debug>(
-    view: &crate::GroupView,
-    obj: &crate::RepCXLObject<T>,
-    data: T,
-) -> Result<(), String> {
-    let entry = ObjectMemoryEntry::new_nowid(data);
-    match mem_writeall(obj.info.offset, entry, &view.memory_nodes) {
-        Ok(()) => Ok(()),
-        Err(MemoryError(memory_node_id)) => {
-            Err(format!("Memory node {} failed during write", memory_node_id))
-        }
-    }
-}
 
 /// Client-reader: clients perform read operation directly i.e. no read thread
 /// processing requests
-pub fn async_best_effort_read_client<T: Copy + PartialEq + std::fmt::Debug>(
+pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
     view: &crate::GroupView,
-    obj: &crate::RepCXLObject<T>,
+    obj_info: &crate::ObjectInfo,
 ) -> Result<ReadReturn<T>, String> {
 
-    match mem_readends(obj.info.offset, &view.memory_nodes) {
+    match mem_readends(obj_info.offset, &view.memory_nodes) {
         Ok(states) => {
             // check if all states are consistent by VALUE since best effort does not use WID
 
@@ -146,6 +110,42 @@ pub fn async_best_effort_read_client<T: Copy + PartialEq + std::fmt::Debug>(
         }
     }
 }
+
+
+/// Thread-reader: process read requests from repCXL object channels and sends
+/// ReadReturn. inter-thread communication might lead to overhead, prefer 
+/// _client version for better latency  
+pub fn async_best_effort_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
+    actx: AlgorithmContext,
+    req_queue: kanal::Receiver<ReadRequest<T>>,
+) {
+    let view = actx.group_view;
+    loop {
+        if actx.stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
+        match req_queue.recv() {
+            Ok(req) => {
+                match async_best_effort_read(&view, &req.obj_info) {
+                    Ok(result) => {
+                        if let Err(e) = req.ack_tx.send(result) {
+                            error!("Failed to send read response: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to read object: {}", e);
+                    }
+                }             
+            },
+            Err(e) => {
+                log::info!("[READ] Read request channel closed: {}", e);
+                break; // exit thread
+            }
+        }
+    }
+}
+
+
 
 
 pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(

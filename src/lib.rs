@@ -160,7 +160,7 @@ pub struct RepCXL<T> {
     rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
     start_instant: Instant,
     stop_flag: Arc<AtomicBool>,
-    logger: Option<utils::ms_logger::MonsterStateLogger>,
+    logger_path: Option<String>,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -197,7 +197,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             rreq_queue_rx: Some(rrx),
             start_instant: std::time::Instant::now(),
             stop_flag: Arc::new(AtomicBool::new(false)),
-            logger: None,
+            logger_path: None,
         }
     }
 
@@ -206,7 +206,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn enable_file_log(&mut self, path: &str) {
         let mut log = utils::ms_logger::MonsterStateLogger::new(path);
         log.clear();
-        self.logger = Some(log);
+        self.logger_path = Some(path.to_string());
     }
 
     pub fn register_process(&mut self, pid: u32) {
@@ -377,7 +377,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Uses direct no-thread path when available, otherwise falls back to
     /// channel-based object write.
     pub fn write_object(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
-        match algorithms::write_nothread(&self.config.algorithm, &self.view, obj, data) {
+        match algorithms::write(&self.config.algorithm, &self.view, obj, data) {
             Ok(()) => Ok(()),
             Err(_) => obj.write(data),
         }
@@ -387,24 +387,25 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Retries the operation up to `config.read_retries` times if it returns a
     /// dirty read.
     pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        
-        // attempt best effort read first
-        let mut res = algorithms::read_nothread(
-                            &self.config.algorithm,
-                            self.start_instant,
-                            Duration::from_nanos(self.config.round_time),
-                            self.config.read_offset,
-                            &self.view, 
-                            obj);
+        // build alg context
+        let actx = algorithms::AlgorithmContext {
+                group_view: self.view.clone(),
+                start_instant: self.start_instant,
+                round_time: Duration::from_nanos(self.config.round_time),
+                read_offset: self.config.read_offset,
+                stop_flag: self.stop_flag.clone(),
+                logger: self.logger_path.clone(),
+            };
 
+        let mut res = algorithms::read(
+                            &self.config.algorithm,
+                            &actx,
+                            obj);
         // retry if dirty with offset time
         for _ in 0..self.config.read_retries{
-            res = algorithms::read_nothread(
+            res = algorithms::read(
                             &self.config.algorithm,
-                            self.start_instant,
-                            Duration::from_nanos(self.config.round_time),
-                            self.config.read_offset,
-                            &self.view, 
+                            &actx,
                             obj); 
                 
             match res {
@@ -432,35 +433,36 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // for both read and write threads move the rx queue to the thread
             // and keep the tx queue in main state
 
-            // WRITE thread
-            let wactx = algorithms::WriteAlgorithmContext {
+            // build thread context
+            let wactx = algorithms::AlgorithmContext {
                 group_view: self.view.clone(),
                 start_instant: self.start_instant,
                 round_time: Duration::from_nanos(self.config.round_time),
-                req_queue: self.wreq_queue_rx.take().expect("Receiver already taken"),
+                read_offset: self.config.read_offset,
                 stop_flag: self.stop_flag.clone(),
-                logger: self.logger.take(),
+                logger: self.logger_path.clone(),
             };
+
+            let ractx = wactx.clone();
+
+            // WRITE thread
+            let wreq_queue = self.wreq_queue_rx.take().expect("Receiver already taken");
 
             let core_affinity = self.config.core_affinity;
             std::thread::spawn(move || {
                 if let Some(core) = core_affinity {
                         core_affinity::set_for_current(core_affinity::CoreId { id: core });
                 }
-                algorithms::write_thread(&algorithm, wactx);
+                algorithms::write_thread(&algorithm, wactx, wreq_queue);
             });
 
             // READ thread
             let algo = self.config.algorithm.clone();
-            let ractx = algorithms::ReadAlgorithmContext {
-                group_view: self.view.clone(),
-                req_queue_rx: self.rreq_queue_rx.take().expect("Receiver already taken"),
-                stop_flag: self.stop_flag.clone(),
-            };
+            let rreq_queue = self.rreq_queue_rx.take().expect("Receiver already taken");
 
             std::thread::spawn(move || {
                 // @TODO: pin thread for read?
-                algorithms::read_thread(&algo, ractx);
+                algorithms::read_thread(&algo, ractx, rreq_queue);
             });
         }
 

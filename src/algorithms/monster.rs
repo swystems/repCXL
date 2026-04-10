@@ -1,11 +1,11 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, Duration};
+use std::time::{Instant, Duration};
 use log::{error, debug};
 
-use super::{WriteAlgorithmContext, ReadAlgorithmContext};
+use super::{AlgorithmContext};
 use crate::timer;
-use crate::request::{Wid, ReadReturn};
+use crate::request::{Wid, WriteRequest, ReadRequest, ReadReturn};
 use crate::safe_memio::{ObjectMemoryEntry, mem_writeall, mem_readall, mem_readends, MemoryError};
 use crate::utils::ms_logger;
 
@@ -88,10 +88,18 @@ fn is_overtime(round_start: Instant, round_time: Duration) -> bool {
 }
 
 
-pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgorithmContext<T>) {
+pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
+    actx: AlgorithmContext, 
+    req_queue: kanal::Receiver<WriteRequest<T>>) {
     // let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
     let mut monster_state = MonsterState::Try;
-    let view = wactx.group_view;
+    let view = actx.group_view;
+
+    let mut logger = actx.logger.as_ref().map(|path| {
+        let mut logger = ms_logger::MonsterStateLogger::new(path);
+        logger.clear();
+        logger
+    });
 
     // MONSTER loop vars
     let mut pending_req = None; // pending write request
@@ -104,16 +112,16 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgo
     let mnode_state = view.get_master_node().unwrap().get_state();
     let owcc = mnode_state.get_owcc();
 
-    let round_zero = wactx.start_instant;
+    let round_zero = actx.start_instant;
 
     // there might be some delays before we get here, wait till start of the next round 
     let (mut round_num, mut round_start) = timer::wait_next_round(
             round_zero, 
-            wactx.round_time, 
+            actx.round_time, 
             timer::ROUND_SLEEP_RATIO);
 
     loop {
-        if wactx.stop_flag.load(Ordering::Relaxed) {
+        if actx.stop_flag.load(Ordering::Relaxed) {
             monster_info!(monster_state, "Stop flag is set, exiting");
             log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
                 stats.conflicts, 
@@ -134,13 +142,13 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgo
         let _ = stats.update_sync_failure(round_num);
 
         // Log state transition if logging is enabled
-        if let Some(ref mut logger) = wactx.logger {
+        if let Some(ref mut logger) = logger {
             logger.log_monster(round_num, monster_state, oid);
         }
 
         match monster_state {
             MonsterState::Try => {
-                match wactx.req_queue.try_recv() {
+                match req_queue.try_recv() {
                     Ok(Some(req)) => {
                         wid = Wid::new(round_num, view.self_id);
                         oid = req.obj_info.id;
@@ -170,7 +178,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgo
                         }
                     }
                 }
-                if is_overtime(round_start, wactx.round_time) {
+                if is_overtime(round_start, actx.round_time) {
                     stats.try_overtime += 1;
                 }
             },
@@ -207,7 +215,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgo
                     // not the last writer
                     monster_state = MonsterState::Wait;
                 }
-                if is_overtime(round_start, wactx.round_time) {
+                if is_overtime(round_start, actx.round_time) {
                     stats.check_overtime += 1;
                 }
             },
@@ -246,7 +254,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgo
                         }
                     }
 
-                    if is_overtime(round_start, wactx.round_time) {
+                    if is_overtime(round_start, actx.round_time) {
                         stats.replicate_overtime += 1;
                     }
                 // }
@@ -305,18 +313,28 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgo
 
         (round_num, round_start) = timer::wait_next_round(
             round_zero, 
-            wactx.round_time, timer::ROUND_SLEEP_RATIO);
+            actx.round_time, timer::ROUND_SLEEP_RATIO);
 
     }
 }
 
 
 
-pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgorithmContext<T>) {
+pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
+    actx: AlgorithmContext, 
+    req_queue: kanal::Receiver<WriteRequest<T>>) {
 
     let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
     let mut monster_state = MonsterState::Try;
-    let view = wactx.group_view;
+    
+    let view = actx.group_view;
+    let mut logger = actx.logger.as_ref().map(|path| {
+        let mut logger = ms_logger::MonsterStateLogger::new(path);
+        logger.clear();
+        logger
+    });
+
+
     // MONSTER loop vars
     let mut pending_req = None; // pending write request
     let mut last_writer_pid = 0;
@@ -329,14 +347,14 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlg
     let mnode_state = view.get_master_node().unwrap().get_state();
     let fwcc = mnode_state.get_fwcc();
 
-    let round_zero = wactx.start_instant;
+    let round_zero = actx.start_instant;
 
     // wait to start
     let mut round_start = round_zero;
     timer::wait_start_time(round_zero, timer::ROUND_SLEEP_RATIO);
 
     loop {
-        if wactx.stop_flag.load(Ordering::Relaxed) {
+        if actx.stop_flag.load(Ordering::Relaxed) {
             monster_info!(monster_state, "Stop flag is set, exiting");
             log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
                 stats.conflicts, 
@@ -357,13 +375,13 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlg
         let _ = stats.update_sync_failure(round_num);
 
         // Log state transition if logging is enabled
-        if let Some(ref mut logger) = wactx.logger {
+        if let Some(ref mut logger) = logger {
             logger.log_monster(round_num, monster_state, oid);
         }
 
         match monster_state {
             MonsterState::Try => {
-                match wactx.req_queue.try_recv() {
+                match req_queue.try_recv() {
                     Ok(Some(req)) => {
                         wid = Wid::new(round_num, view.self_id);
                         oid = req.obj_info.id;
@@ -391,7 +409,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlg
                         }
                     }
                 }
-                if is_overtime(round_start, wactx.round_time) {
+                if is_overtime(round_start, actx.round_time) {
                     stats.try_overtime += 1;
                 }
             },
@@ -448,7 +466,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlg
                     }
                 }
 
-                if is_overtime(round_start, wactx.round_time) {
+                if is_overtime(round_start, actx.round_time) {
                     stats.check_overtime += 1;
                 }
             
@@ -479,7 +497,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlg
                     }
                 }
 
-                if is_overtime(round_start, wactx.round_time) {
+                if is_overtime(round_start, actx.round_time) {
                     stats.replicate_overtime += 1;
                 }
                 // }
@@ -536,78 +554,27 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlg
             }
         }
 
-        (round_num, round_start) = timer::wait_next_round(round_zero, wactx.round_time, timer::ROUND_SLEEP_RATIO);
+        (round_num, round_start) = timer::wait_next_round(round_zero, actx.round_time, timer::ROUND_SLEEP_RATIO);
 
     }
-}
-
-/// MONSTER READ: 
-/// - pull read requests from queue (blocking) 
-/// - async read all memory nodes and return ReadSafe or ReadDirty based
-/// on state consistency
-pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
-    ractx: ReadAlgorithmContext<T>,
-) {
-
-    let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
-    let view = ractx.group_view;
-    
-    loop {
-        if ractx.stop_flag.load(Ordering::Relaxed) {
-            break;
-        }
-        match ractx.req_queue_rx.recv() {
-            Ok(req) => {
-                match mem_readall(req.obj_info.offset, &view.memory_nodes) {
-                    Ok(states) => {
-                        // check if all states are consistent (have the same wid (i.e. value))
-                        // and get the latest wid with one pass
-                        // println!("{:?}", states);
-                        let (consistent, latest) = states.iter().skip(1).fold(
-                            (true, &states[0]),
-                            |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
-                        );
-                        // return based on consistency
-                        let result = if consistent {
-                            ReadReturn::ReadSafe(latest.value)
-                        } else {
-                            dirty_reads.push(states.iter().map(|s| s.wid).collect());
-                            ReadReturn::ReadDirty(latest.value)
-                        };
-                        if let Err(e) = req.ack_tx.send(result) {
-                            error!("Failed to send read response: {}", e);
-                        }
-                    },
-                    Err(MemoryError(memory_node_id)) => {
-                        error!("Memory node {} failed during read", memory_node_id);
-                    }
-                }
-            },
-            Err(e) => { // the repcxl instance keeps the original sender, so this should occur when the instance is dropped 
-                log::info!("[READ] Read request channel closed: {}", e);
-                break; 
-            }
-        }
-    }
-
 }
 
 
 /// Client-reader: clients perform read operation directly i.e. no read thread
 /// processing requests
-pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
-    start_instant: Instant,
-    round_time: Duration,
-    read_offset: Option<f64>,
-    view: &crate::GroupView,
-    obj: &crate::RepCXLObject<T>,
+pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
+    actx: &AlgorithmContext,
+    obj_info: &crate::ObjectInfo,
 ) -> Result<ReadReturn<T>, String> {
 
-    if let Some(offset) = read_offset {
-        timer::wait_round_progress(offset, start_instant, round_time, timer::ROUND_SLEEP_RATIO);
+    if let Some(offset) = actx.read_offset {
+        timer::wait_round_progress(offset, 
+            actx.start_instant, 
+            actx.round_time,
+            timer::ROUND_SLEEP_RATIO);
     }
 
-    match mem_readends(obj.info.offset, &view.memory_nodes) {
+    match mem_readends(obj_info.offset, &actx.group_view.memory_nodes) {
         Ok(states) => {
             // check if all states are consistent (have the same wid (i.e. value))
             // and get the latest wid with one pass
@@ -635,3 +602,41 @@ pub fn monster_read_client<T: Copy + PartialEq + std::fmt::Debug>(
         }
     }
 }
+
+/// Thread-reader:
+/// - pull read requests from queue (blocking) 
+/// - call monster_read and return result to client
+pub fn monster_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
+    actx: AlgorithmContext,
+    req_queue: kanal::Receiver<ReadRequest<T>>
+) {
+    
+    loop {
+        if actx.stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
+        match req_queue.recv() {
+            Ok(req) => {
+                match monster_read(&actx, &req.obj_info) {
+                    Ok(result) => {
+                        
+                        if let Err(e) = req.ack_tx.send(result) {
+                            error!("Failed to send read response: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        error!("read error: {}", e);
+                    }
+                }
+            },
+            Err(e) => { // the repcxl instance keeps the original sender, so this should occur when the instance is dropped 
+                log::info!("[READ] Read request channel closed: {}", e);
+                break; 
+            }
+        }
+    }
+
+}
+
+

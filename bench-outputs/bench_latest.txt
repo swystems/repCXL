@@ -1,4 +1,4 @@
-Date: 20260410_1828
+Date: 20260410_1851
 YCSB workload: workloada_64_large
 
 ============= RepCXL configuration =============
@@ -11,9 +11,9 @@ read_retries = 0
 ============= Benchmark Results =============
 
 === hardanger.dat ===
-Ops: 2010000  Time: 6.01s  Throughput: 334502.13 ops/sec
+Ops: 2010000  Time: 7.97s  Throughput: 252137.19 ops/sec
 Dirty reads: 0 / 1005827 (0.000%)
                  avg       P99.99         P100
-Read         3.04μs     14.86μs       3.71ms
-Write         2.58μs     13.99μs       3.16ms
+Read         3.83μs     16.42μs       3.72ms
+Write         3.73μs     16.11μs       3.46ms
 
