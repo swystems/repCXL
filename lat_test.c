@@ -37,7 +37,7 @@ int main() {
     volatile unsigned int *data = (volatile unsigned int *)map_ptr;
     
     unsigned long long start = rdtsc();
-    for(int i = 0; i < 1000; i++) {
+    for(int i = 0; i < 10000; i++) {
         data[0] = i; // UC write
     }
     unsigned long long end = rdtsc();
@@ -45,7 +45,7 @@ int main() {
 
     // 5. Measure Read Latency
     start = rdtsc();
-    for(int i = 0; i < 1000; i++) {
+    for(int i = 0; i < 10000; i++) {
         unsigned long val = data[0]; // UC read
         (void)val;
     }

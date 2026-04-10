@@ -81,6 +81,8 @@ pub struct RepCXLObject<T: Copy> {
 }
 
 impl<T: Copy> RepCXLObject<T> {
+    const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
+
     pub fn new(
         id: usize,
         offset: usize,
@@ -96,19 +98,36 @@ impl<T: Copy> RepCXLObject<T> {
     }
 
     pub fn write(&self, data: T) -> Result<(), String> {
+        let client_start = Instant::now();
         let (ack_tx, ack_rx) = kanal::unbounded();
         let req = WriteRequest::new(self.info, data, ack_tx);
+        let trace_id = req.trace_id;
 
         self.wreq_queue_tx
             .send(req)
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
+        let send_to_worker = client_start.elapsed();
+        let ack_wait_start = Instant::now();
+
         // std::thread::sleep(Duration::from_millis(10));
         // wait for ack
-        match ack_rx.recv() {
+        let result = match ack_rx.recv() {
             Ok(true) => Ok(()),
             Ok(false) => Err("Failed write operation".into()),
             Err(e) => Err(format!("Failed to receive ack: {}", e)),
+        };
+
+        if trace_id % Self::WRITE_TRACE_SAMPLE_RATE == 0 {
+            debug!(
+                "[WRITE_TRACE][client] id={} send_to_worker={}ns ack_wait={}ns total={}ns",
+                trace_id,
+                send_to_worker.as_nanos(),
+                ack_wait_start.elapsed().as_nanos(),
+                client_start.elapsed().as_nanos(),
+            );
         }
+
+        result
     }
 
     pub fn read(&self) -> Result<ReadReturn<T>, String> {
@@ -186,39 +205,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             stop_flag: Arc::new(AtomicBool::new(false)),
             logger: None,
         }
-    }
-
-    /// Use the config-specified read algorithm to read an object. 
-    /// Retries the operation up to `config.read_retries` times if it returns a
-    /// dirty read.
-    pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        
-        // attempt best effort read first
-        let mut res = algorithms::read_nothread(
-                            &self.config.algorithm,
-                            self.start_instant,
-                            Duration::from_nanos(self.config.round_time),
-                            self.config.read_offset,
-                            &self.view, 
-                            obj);
-
-        // retry if dirty with offset time
-        for _ in 0..self.config.read_retries{
-            res = algorithms::read_nothread(
-                            &self.config.algorithm,
-                            self.start_instant,
-                            Duration::from_nanos(self.config.round_time),
-                            self.config.read_offset,
-                            &self.view, 
-                            obj); 
-                
-            match res {
-                Ok(ReadReturn::ReadDirty(_)) => continue,
-                _ => break,
-            }
-        }
-
-        res
     }
 
     /// Enable state logging to a file. Clears any existing log at the path.
@@ -375,10 +361,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Attempt to get an object reference by its ID first in the local cache
     /// and then in the shared state.
     pub fn get_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
-        // info!(
-        //     "Object with id {} not found in cache, looking in shared state",
-        //     id
-        // );
 
         let state = self.read_state_from_any().unwrap();
 
@@ -395,6 +377,49 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         info!("Object {} not found in shared state", id);
 
         None
+    }
+
+    /// Use the config-specified write algorithm to write an object.
+    /// Uses direct no-thread path when available, otherwise falls back to
+    /// channel-based object write.
+    pub fn write_object(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
+        match algorithms::write_nothread(&self.config.algorithm, &self.view, obj, data) {
+            Ok(()) => Ok(()),
+            Err(_) => obj.write(data),
+        }
+    }
+
+    /// Use the config-specified read algorithm to read an object. 
+    /// Retries the operation up to `config.read_retries` times if it returns a
+    /// dirty read.
+    pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
+        
+        // attempt best effort read first
+        let mut res = algorithms::read_nothread(
+                            &self.config.algorithm,
+                            self.start_instant,
+                            Duration::from_nanos(self.config.round_time),
+                            self.config.read_offset,
+                            &self.view, 
+                            obj);
+
+        // retry if dirty with offset time
+        for _ in 0..self.config.read_retries{
+            res = algorithms::read_nothread(
+                            &self.config.algorithm,
+                            self.start_instant,
+                            Duration::from_nanos(self.config.round_time),
+                            self.config.read_offset,
+                            &self.view, 
+                            obj); 
+                
+            match res {
+                Ok(ReadReturn::ReadDirty(_)) => continue,
+                _ => break,
+            }
+        }
+
+        res
     }
 
     /// Start the repCXL protocol threads without synchronization. Use `sync_start` 

@@ -144,7 +144,6 @@ fn main() {
     workload.run_ops.extend_from_within(0..warmup_len);
 
 
-    
 
     info!("Executing YCSB run phase...");
     let mut start_total = std::time::Instant::now();

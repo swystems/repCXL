@@ -1,9 +1,16 @@
 use std::hash::Hash;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use crate::shmem::object_index::ObjectInfo;
+
+static WRITE_REQ_TRACE_ID: AtomicU64 = AtomicU64::new(1);
+
 pub struct WriteRequest<T> {
     pub(crate) obj_info: ObjectInfo,
     pub data: T,
     pub ack_tx: kanal::Sender<bool>,
+    pub trace_id: u64,
+    pub enqueue_at: Instant,
 }
 
 impl<T> WriteRequest<T> {
@@ -12,6 +19,8 @@ impl<T> WriteRequest<T> {
             obj_info,
             data,
             ack_tx,
+            trace_id: WRITE_REQ_TRACE_ID.fetch_add(1, Ordering::Relaxed),
+            enqueue_at: Instant::now(),
         }
     }
 

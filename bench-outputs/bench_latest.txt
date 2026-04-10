@@ -1,43 +1,17 @@
-Date: 20260313_1000
+Date: 20260409_1550
 YCSB workload: workloada_64_large
 
 ============= RepCXL configuration =============
-processes = [0, 1, 2, 3]
-algorithm = "fmonster"
+processes = [0]
+algorithm = "async_best_effort"
 round_time = 1000 
 read_retries = 100
 core_affinity = 2 
 ============= Benchmark Results =============
 
-=== vm0.dat ===
-Monster: conflicts=9, sync_failures=244240, empty_requests=2630777, try_overtime=3257, check_overtime=192, replicate_overtime=112434
-Ops: 2010000  Time: 5.86s  Throughput: 342759.02 ops/sec
-Dirty reads: 4 / 1006013 (0.000%)
+=== hardanger.dat ===
+Ops: 2010000  Time: 3.86s  Throughput: 520590.92 ops/sec
+Dirty reads: 0 / 1004526 (0.000%)
                  avg       P99.99         P100
-Read         1.75μs      8.59μs    114.69μs
-Write         3.86μs     11.45μs    718.24μs
-
-=== vm1.dat ===
-Monster: conflicts=460, sync_failures=138244, empty_requests=2680094, try_overtime=10057, check_overtime=179, replicate_overtime=54720
-Ops: 2010000  Time: 5.81s  Throughput: 346029.16 ops/sec
-Dirty reads: 3 / 1005424 (0.000%)
-                 avg       P99.99         P100
-Read         1.73μs      9.06μs    816.69μs
-Write         4.31μs     11.78μs     480.01ms
-
-=== vm2.dat ===
-Monster: conflicts=1503, sync_failures=25272, empty_requests=2108979, try_overtime=834, check_overtime=219, replicate_overtime=13588
-Ops: 2010000  Time: 5.27s  Throughput: 381459.51 ops/sec
-Dirty reads: 6 / 1005111 (0.001%)
-                 avg       P99.99         P100
-Read         1.27μs      8.18μs    276.30μs
-Write         3.98μs       1.12ms     232.74ms
-
-=== vm3.dat ===
-Monster: conflicts=2425, sync_failures=33749, empty_requests=2217068, try_overtime=922, check_overtime=256, replicate_overtime=15783
-Ops: 2010000  Time: 5.28s  Throughput: 380372.80 ops/sec
-Dirty reads: 6 / 1004925 (0.001%)
-                 avg       P99.99         P100
-Read         1.29μs      8.66μs    109.27μs
-Write         3.74μs     85.95μs       1.12ms
-
+Read         1.10μs      6.25μs       2.74ms
+Write         2.37μs      9.69μs       4.14ms

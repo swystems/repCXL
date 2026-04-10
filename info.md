@@ -2,6 +2,45 @@
 
 A collection of useful howtos, concepts, explainations. 
 
+### Create CXL DAX devices
+
+CXL memory can be attached either as (1) a NUMA node or as (2) an mmappable DAX 
+character device. We can use (1) for memory tests like `mlc` when we want the 
+kernel to manage the memory for us. (2) is more convenient when we want to manage
+the memory ourselves, e.g., for repCXL shared memory use case. 
+
+Create multiple multiple DAX devices (to simulate memory nodes) as follows. 
+Load necessary modules:
+
+```sh
+echo offline > /sys/devices/system/memory/auto_online_blocks
+
+modprobe cxl_pci
+modprobe cxl_mem
+modprobe cxl_acpi
+modprobe cxl_pmem
+modprobe cxl_port
+modprobe dax_hmem
+modprobe device_dax
+```
+
+List existing dax devices:
+
+    daxctl list -u
+
+List available CXL region:
+
+    daxctl list -Ru
+
+Create a new device with 4G memory
+
+    daxctl create-device -s 4G
+
+If an existing device fills all the available memory already, resize
+
+    daxctl reconfigure-device -s <new_size> -u /dev/dax<number>
+
+
 ## QEMU VM management
 > See `ansible/` folder for automated workflows. Info for manual setup below
 

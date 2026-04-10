@@ -72,3 +72,15 @@ pub fn read_nothread<T: Copy + PartialEq + std::fmt::Debug>(
         _ => panic!("Unknown read algorithm, check config: {}", algorithm),
     }
 }
+
+pub fn write_nothread<T: Copy + PartialEq + std::fmt::Debug>(
+    algorithm: &String,
+    group_view: &GroupView,
+    obj: &RepCXLObject<T>,
+    data: T,
+) -> Result<(), String> {
+    match algorithm.as_str() {
+        "async_best_effort" => best_effort::async_best_effort_write_client(group_view, obj, data),
+        _ => Err(format!("write_nothread not supported for algorithm '{}'", algorithm)),
+    }
+}

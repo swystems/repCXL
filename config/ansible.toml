@@ -4,9 +4,9 @@
 # Memory nodes. In the VM setup, memory regions of the CXL node from the host 
 # are exposed as PCI devices with inter-vm shared memory 
 mem_nodes = [
-"/sys/bus/pci/devices/0000:00:03.0/resource2", 
-"/sys/bus/pci/devices/0000:00:04.0/resource2",
-"/sys/bus/pci/devices/0000:00:05.0/resource2"
+"/dev/dax0.0",
+"/dev/dax0.1",
+"/dev/dax0.2",
 ] 
 
 # Total size of each memory node in bytes, padded to chunk size
@@ -20,7 +20,7 @@ id = 0
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = [0, 1, 2, 3]
+processes = [0]
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
@@ -29,11 +29,11 @@ startup_delay = 1000000000
 round_time = 1000 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "fmonster"
+algorithm = "async_best_effort"
 
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = 100
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
-core_affinity = 2 
+# core_affinity = 2 
 

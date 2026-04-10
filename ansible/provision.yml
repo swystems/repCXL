@@ -22,10 +22,10 @@
       debug:
         var: rust_install
 
-    - name: Verify rust installation
-      shell: /home/{{ ansible_user }}/.cargo/bin/rustc --version
-      register: rustc_version
-      changed_when: false
+    # - name: Verify rust installation
+    #   shell: /home/{{ ansible_user }}/.cargo/bin/rustc --version
+    #   register: rustc_version
+    #   changed_when: false
 
     - name: Show rustc version
       debug:

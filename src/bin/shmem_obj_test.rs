@@ -46,9 +46,9 @@ fn main() {
 
             let obj100 = rcxl.new_object(100).expect("failed to create object");
             obj100.write(msg).expect("failed to write to object");
-            obj100.write(*b"repcxl nocach1").expect("failed to write to object");
-            obj100.write(*b"repcxl nocach2").expect("failed to write to object");
-            obj100.write(*b"repcxl nocach3").expect("failed to write to object");
+            // obj100.write(*b"repcxl nocach1").expect("failed to write to object");
+            // obj100.write(*b"repcxl nocach2").expect("failed to write to object");
+            // obj100.write(*b"repcxl nocach3").expect("failed to write to object");
         },
         Some("r") | Some("replica") => {
             rcxl.start(); // start protocol threads
@@ -57,7 +57,7 @@ fn main() {
             let obj100 = rcxl.get_object(100).expect("failed to get object");
             match rcxl.read_object(&obj100).expect("failed to read from object") {
                 rep_cxl::request::ReadReturn::ReadSafe(buf) => {
-                    // assert_eq!(buf, msg, "replica read incorrect data");
+                    assert_eq!(buf, msg, "replica read incorrect data");
                     println!("Replica successfully read: {}", String::from_utf8_lossy(&buf));
                 },
                 rep_cxl::request::ReadReturn::ReadDirty(_) => {

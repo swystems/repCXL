@@ -4,9 +4,9 @@
 # Memory nodes. In the VM setup, memory regions of the CXL node from the host 
 # are exposed as PCI devices with inter-vm shared memory 
 mem_nodes = [
-"/sys/bus/pci/devices/0000:00:03.0/resource2", 
-"/sys/bus/pci/devices/0000:00:04.0/resource2",
-"/sys/bus/pci/devices/0000:00:05.0/resource2"
+"/dev/dax0.0",
+"/dev/dax0.1",
+"/dev/dax0.2",
 ] 
 
 # Total size of each memory node in bytes, padded to chunk size
@@ -14,7 +14,7 @@ mem_size = 1_000_000_000
 chunk_size = 64
 
 # (required) unique identifier for the repCXL instance. Can be passed with -i
-id = {{ vm_id }} 
+id = {{ repcxl_id }} 
 
 # List of process IDs in the cluster. Can be specified as:
 #   - A number (4) → generates IDs [0, 1, 2, 3]
@@ -35,7 +35,7 @@ algorithm = "{{ algorithm }}"
 read_retries = {{ read_retries }}
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
-core_affinity = 2 
+# core_affinity = 2 
 
 {% if read_offset is defined %}
 read_offset = {{ read_offset }}

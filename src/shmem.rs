@@ -1,5 +1,6 @@
 use libc::{mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 
 
@@ -60,7 +61,8 @@ pub(crate) struct MemoryNode {
 }
 
 impl MemoryNode {
-    // Create a MemoryNode from a file in tmpfs mapped to a CXL node.
+    // Create a MemoryNode from a file in tmpfs mapped to a CXL node or from
+    // a CXL DAX device (e.g., /dev/dax0.0)
     // Processes/VMs on same host will share the memory region, not guaranteed
     // across different hosts
     // assumes all processes/VMs use the same file path
@@ -77,19 +79,29 @@ impl MemoryNode {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
+            .custom_flags(libc::O_SYNC) // avoid page cache effects
             .open(path)
             .expect("Failed to open shared memory. Does the file exist?");
+
+        /* DAX mapping requires a 2MiB alignment */
+        let page = 2 * 1024 * 1024;
+        if size < page {
+            panic!("Size must be at least 2 MiB for DAX mapping");
+        }
+
+        let page_aligned_size = (size / page) * page;
 
         let ptr = unsafe {
             mmap(
                 std::ptr::null_mut(),
-                size,
+                page_aligned_size,
                 PROT_READ | PROT_WRITE,
                 MAP_SHARED,
                 file.as_raw_fd(),
                 0,
             )
         };
+
 
         if ptr == libc::MAP_FAILED {
             panic!(

@@ -8,6 +8,8 @@ use crate::safe_memio::{safe_write, mem_readall, mem_writeall, mem_readends, Mem
 use crate::{GroupView, WriteRequest, ReadRequest};
 use crate::timer;
 
+const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
+
 
 pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: GroupView,
@@ -25,6 +27,10 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
 
         match req_queue_rx.recv() {
             Ok(req) => {
+                let trace_id = req.trace_id;
+                let queue_wait = req.enqueue_at.elapsed();
+                let write_start = Instant::now();
+
                 // write data to all memory nodes
                 let (oi, data, ack_tx) = req.to_tuple();
                 for node in &view.memory_nodes {
@@ -38,8 +44,19 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
                     });
                 }
 
+                let replicate_time = write_start.elapsed();
+
                 if let Err(e) = ack_tx.send(true) {
                         error!("Failed to send ack: {}", e);
+                }
+
+                if trace_id % WRITE_TRACE_SAMPLE_RATE == 0 {
+                    debug!(
+                        "[WRITE_TRACE][worker] id={} queue_wait={}ns replicate={}ns",
+                        trace_id,
+                        queue_wait.as_nanos(),
+                        replicate_time.as_nanos(),
+                    );
                 }
             },
             Err(e) => {
@@ -91,6 +108,23 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
                 log::info!("[READ] Read request channel closed: {}", e);
                 break; // exit thread
             }
+        }
+    }
+}
+
+
+/// Client-writer: clients perform write operation directly i.e. no write
+/// thread request handling.
+pub fn async_best_effort_write_client<T: Copy + PartialEq + std::fmt::Debug>(
+    view: &crate::GroupView,
+    obj: &crate::RepCXLObject<T>,
+    data: T,
+) -> Result<(), String> {
+    let entry = ObjectMemoryEntry::new_nowid(data);
+    match mem_writeall(obj.info.offset, entry, &view.memory_nodes) {
+        Ok(()) => Ok(()),
+        Err(MemoryError(memory_node_id)) => {
+            Err(format!("Memory node {} failed during write", memory_node_id))
         }
     }
 }
