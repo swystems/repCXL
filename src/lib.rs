@@ -183,12 +183,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             view.memory_nodes.push(node);
         }
 
-        // init shared state
-        // let state = SharedState::new(config.mem_size, config.chunk_size);
-        // for node in &view.memory_nodes {
-        //     node.write_state(state);
-        // }
-
         // init read and write request queues
         let (wtx, wrx) = kanal::unbounded();
         let (rtx, rrx) = kanal::unbounded();
@@ -426,33 +420,48 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// for sync protocols.
     pub fn start(&mut self) {
         let algorithm = self.config.algorithm.clone();
-        let rt = Duration::from_nanos(self.config.round_time);
-        let start_instant = Instant::now();
-        self.start_instant = start_instant;
 
-        let v = self.view.clone();
+        if self.config.pipeline {
+            info!("Starting pipelined write thread for algorithm {}", algorithm);
+        } else {
+            info!("Starting non-pipelined write thread for algorithm {}", algorithm);
+        }
 
 
-        // WRITE thread
-        {
-            core_affinity::set_for_current(core_affinity::CoreId { id: 1 });
-            let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
-            let logger = self.logger.take();
-            let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+        // pipeline mode uses threads and requests queues
+        if self.config.pipeline {
+            // for both read and write threads move the rx queue to the thread
+            // and keep the tx queue in main state
+            let wactx = algorithms::WriteAlgorithmContext::new(
+                self.view.clone(),
+                self.start_instant,
+                Duration::from_nanos(self.config.round_time),
+                self.wreq_queue_rx.take().expect("Receiver already taken"),
+                self.stop_flag.clone(),
+                self.logger.take(),
+
+            );
+
+            // WRITE thread
+            let core_affinity = self.config.core_affinity;
             std::thread::spawn(move || {
-                algorithms::get_write_algorithm(algorithm)(v, start_instant, rt, rx, stop, logger);
+                if let Some(core) = core_affinity {
+                        core_affinity::set_for_current(core_affinity::CoreId { id: core });
+                }
+                algorithms::write_thread(&algorithm, wactx);
             });
         }
 
         // READ thread
         // {
-        //     // no thread pin for read as it is unused rn
         //     let stop = self.stop_flag.clone();
         //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
         //     std::thread::spawn(move || {
-        //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
+        //         // no thread pin for read as it is unused rn
+        //         algorithms::get_read_algorithm(algorithm)(v, start_instant, rt, rx, stop);
         //     });
         // }
+
 
     }
 
@@ -462,9 +471,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// ensure consistency.
     pub fn sync_start(&mut self) {
         if let Some(_coord) = self.view.get_coordinator() {
-            let algorithm = self.config.algorithm.clone();
-            let rt = Duration::from_nanos(self.config.round_time);
-
             let mstate = self.get_state_from_master().unwrap();
             let sblock = mstate.get_starting_block();
             let start_time;
@@ -498,38 +504,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             let start_instant = timer::system_time_to_instant(start_time);
             self.start_instant = start_instant;
 
-            let v = self.view.clone();
-            // let rt = self.round_time;
+            timer::wait_start_time(start_instant, timer::ROUND_SLEEP_RATIO);
 
-            // for both read and write threads move the rx queue to the thread
-            // and keep the tx queue in state to assign to new objects
+            self.start();
 
-            // WRITE thread
-            {
-                let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
-                let logger = self.logger.take();
-                let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
-                let core_affinity = self.config.core_affinity;
-                std::thread::spawn(move || {
-                    if let Some(core) = core_affinity {
-                         core_affinity::set_for_current(core_affinity::CoreId { id: core });
-                    }
-                    algorithms::get_write_algorithm(algorithm)(v, start_instant, rt, rx, stop, logger);
-                });
-            }
-
-            // READ thread
-            // {
-            //     let stop = self.stop_flag.clone();
-            //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
-            //     std::thread::spawn(move || {
-            //         // no thread pin for read as it is unused rn
-            //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
-            //     });
-            // }
-
-            // block until after start time
-            // std::thread::sleep(Duration::from_secs(2));
         } else {
             error!("FATAL: No coordinator found in group");
             return;

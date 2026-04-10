@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, Duration};
 use log::{error, debug};
 
-// use super::*;
+use super::WriteAlgorithmContext;
 use crate::timer;
 use crate::request::{Wid, WriteRequest, ReadRequest, ReadReturn};
 use crate::safe_memio::{ObjectMemoryEntry, mem_writeall, mem_readall, mem_readends, MemoryError};
@@ -88,16 +88,10 @@ fn is_overtime(round_start: Instant, round_time: Duration) -> bool {
 }
 
 
-pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
-    view: super::GroupView,
-    start_instant: Instant,
-    round_time: Duration,
-    req_queue_rx: kanal::Receiver<WriteRequest<T>>,
-    stop_flag: Arc<AtomicBool>,
-    mut logger_opt: Option<ms_logger::MonsterStateLogger>,
-) {
-    let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
+pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgorithmContext<T>) {
+    // let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
     let mut monster_state = MonsterState::Try;
+    let view = wactx.group_view;
 
     // MONSTER loop vars
     let mut pending_req = None; // pending write request
@@ -110,14 +104,16 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
     let mnode_state = view.get_master_node().unwrap().get_state();
     let owcc = mnode_state.get_owcc();
 
-    let round_zero = start_instant;
+    let round_zero = wactx.start_instant;
 
-    // wait to start
-    let mut round_start = round_zero;
-    timer::wait_start_time(round_zero, timer::ROUND_SLEEP_RATIO);
+    // there might be some delays before we get here, wait till start of the next round 
+    let (mut round_num, mut round_start) = timer::wait_next_round(
+            round_zero, 
+            wactx.round_time, 
+            timer::ROUND_SLEEP_RATIO);
 
     loop {
-        if stop_flag.load(Ordering::Relaxed) {
+        if wactx.stop_flag.load(Ordering::Relaxed) {
             monster_info!(monster_state, "Stop flag is set, exiting");
             log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
                 stats.conflicts, 
@@ -138,13 +134,13 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
         let _ = stats.update_sync_failure(round_num);
 
         // Log state transition if logging is enabled
-        if let Some(ref mut logger) = logger_opt {
+        if let Some(ref mut logger) = wactx.logger {
             logger.log_monster(round_num, monster_state, oid);
         }
 
         match monster_state {
             MonsterState::Try => {
-                match req_queue_rx.try_recv() {
+                match wactx.req_queue.try_recv() {
                     Ok(Some(req)) => {
                         wid = Wid::new(round_num, view.self_id);
                         oid = req.obj_info.id;
@@ -174,7 +170,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                         }
                     }
                 }
-                if is_overtime(round_start, round_time) {
+                if is_overtime(round_start, wactx.round_time) {
                     stats.try_overtime += 1;
                 }
             },
@@ -211,7 +207,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                     // not the last writer
                     monster_state = MonsterState::Wait;
                 }
-                if is_overtime(round_start, round_time) {
+                if is_overtime(round_start, wactx.round_time) {
                     stats.check_overtime += 1;
                 }
             },
@@ -250,7 +246,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                         }
                     }
 
-                    if is_overtime(round_start, round_time) {
+                    if is_overtime(round_start, wactx.round_time) {
                         stats.replicate_overtime += 1;
                     }
                 // }
@@ -307,24 +303,20 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        (round_num, round_start) = timer::wait_next_round(round_zero, round_time, timer::ROUND_SLEEP_RATIO);
+        (round_num, round_start) = timer::wait_next_round(
+            round_zero, 
+            wactx.round_time, timer::ROUND_SLEEP_RATIO);
 
     }
 }
 
 
 
-pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
-    view: super::GroupView,
-    start_instant: Instant,
-    round_time: Duration,
-    req_queue_rx: kanal::Receiver<WriteRequest<T>>,
-    stop_flag: Arc<AtomicBool>,
-    mut logger_opt: Option<ms_logger::MonsterStateLogger>,
-) {
+pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlgorithmContext<T>) {
+
     let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
     let mut monster_state = MonsterState::Try;
-
+    let view = wactx.group_view;
     // MONSTER loop vars
     let mut pending_req = None; // pending write request
     let mut last_writer_pid = 0;
@@ -337,14 +329,14 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
     let mnode_state = view.get_master_node().unwrap().get_state();
     let fwcc = mnode_state.get_fwcc();
 
-    let round_zero = start_instant;
+    let round_zero = wactx.start_instant;
 
     // wait to start
     let mut round_start = round_zero;
     timer::wait_start_time(round_zero, timer::ROUND_SLEEP_RATIO);
 
     loop {
-        if stop_flag.load(Ordering::Relaxed) {
+        if wactx.stop_flag.load(Ordering::Relaxed) {
             monster_info!(monster_state, "Stop flag is set, exiting");
             log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
                 stats.conflicts, 
@@ -365,13 +357,13 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
         let _ = stats.update_sync_failure(round_num);
 
         // Log state transition if logging is enabled
-        if let Some(ref mut logger) = logger_opt {
+        if let Some(ref mut logger) = wactx.logger {
             logger.log_monster(round_num, monster_state, oid);
         }
 
         match monster_state {
             MonsterState::Try => {
-                match req_queue_rx.try_recv() {
+                match wactx.req_queue.try_recv() {
                     Ok(Some(req)) => {
                         wid = Wid::new(round_num, view.self_id);
                         oid = req.obj_info.id;
@@ -399,7 +391,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
                         }
                     }
                 }
-                if is_overtime(round_start, round_time) {
+                if is_overtime(round_start, wactx.round_time) {
                     stats.try_overtime += 1;
                 }
             },
@@ -456,7 +448,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
                     }
                 }
 
-                if is_overtime(round_start, round_time) {
+                if is_overtime(round_start, wactx.round_time) {
                     stats.check_overtime += 1;
                 }
             
@@ -487,7 +479,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
                     }
                 }
 
-                if is_overtime(round_start, round_time) {
+                if is_overtime(round_start, wactx.round_time) {
                     stats.replicate_overtime += 1;
                 }
                 // }
@@ -544,7 +536,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
             }
         }
 
-        (round_num, round_start) = timer::wait_next_round(round_zero, round_time, timer::ROUND_SLEEP_RATIO);
+        (round_num, round_start) = timer::wait_next_round(round_zero, wactx.round_time, timer::ROUND_SLEEP_RATIO);
 
     }
 }

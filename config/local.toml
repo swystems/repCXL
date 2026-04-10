@@ -27,6 +27,9 @@ round_time = 1_000
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "monster"
 
+# Enable pipelined write path (true/false)
+pipeline = false
+
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = 7 
 

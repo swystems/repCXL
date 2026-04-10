@@ -13,11 +13,8 @@ const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
 
 pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
     view: GroupView,
-    _start_time: Instant,
-    _round_time: Duration,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
-    _log_path: Option<MonsterStateLogger>,
 ) {
 
     loop {

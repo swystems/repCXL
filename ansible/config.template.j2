@@ -31,6 +31,9 @@ round_time = {{ round_time }}
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "{{ algorithm }}"
 
+# Enable pipelined write path (true/false)
+pipeline = {{ (pipeline | default(false)) | string | lower }}
+
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = {{ read_retries }}
 

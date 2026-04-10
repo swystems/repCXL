@@ -92,6 +92,7 @@
           echo "============= RepCXL configuration ============="
           grep "processes =" {{ repcxl_config }}
           grep "algorithm =" {{ repcxl_config }}
+          grep "pipeline =" {{ repcxl_config }}
           grep "round_time =" {{ repcxl_config }}
           grep "read_retries =" {{ repcxl_config }}
           grep "read_offset =" {{ repcxl_config }}

@@ -31,8 +31,11 @@ round_time = 1000
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "async_best_effort"
 
+# Enable pipelined write path (true/false)
+pipeline = true
+
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 100
+read_retries = 0
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 2 
