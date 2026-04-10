@@ -416,8 +416,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         res
     }
 
-    /// Start the repCXL protocol threads without synchronization. Use `sync_start` 
-    /// for sync protocols.
+    /// Start the repCXL protocol threads without initial synchronization (for async protocols)
     pub fn start(&mut self) {
         let algorithm = self.config.algorithm.clone();
 
@@ -432,17 +431,17 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         if self.config.pipeline {
             // for both read and write threads move the rx queue to the thread
             // and keep the tx queue in main state
-            let wactx = algorithms::WriteAlgorithmContext::new(
-                self.view.clone(),
-                self.start_instant,
-                Duration::from_nanos(self.config.round_time),
-                self.wreq_queue_rx.take().expect("Receiver already taken"),
-                self.stop_flag.clone(),
-                self.logger.take(),
-
-            );
 
             // WRITE thread
+            let wactx = algorithms::WriteAlgorithmContext {
+                group_view: self.view.clone(),
+                start_instant: self.start_instant,
+                round_time: Duration::from_nanos(self.config.round_time),
+                req_queue: self.wreq_queue_rx.take().expect("Receiver already taken"),
+                stop_flag: self.stop_flag.clone(),
+                logger: self.logger.take(),
+            };
+
             let core_affinity = self.config.core_affinity;
             std::thread::spawn(move || {
                 if let Some(core) = core_affinity {
@@ -450,17 +449,20 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 }
                 algorithms::write_thread(&algorithm, wactx);
             });
-        }
 
-        // READ thread
-        // {
-        //     let stop = self.stop_flag.clone();
-        //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
-        //     std::thread::spawn(move || {
-        //         // no thread pin for read as it is unused rn
-        //         algorithms::get_read_algorithm(algorithm)(v, start_instant, rt, rx, stop);
-        //     });
-        // }
+            // READ thread
+            let algo = self.config.algorithm.clone();
+            let ractx = algorithms::ReadAlgorithmContext {
+                group_view: self.view.clone(),
+                req_queue_rx: self.rreq_queue_rx.take().expect("Receiver already taken"),
+                stop_flag: self.stop_flag.clone(),
+            };
+
+            std::thread::spawn(move || {
+                // @TODO: pin thread for read?
+                algorithms::read_thread(&algo, ractx);
+            });
+        }
 
 
     }
@@ -514,6 +516,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
     }
 
+
+    // stop pipeline threads and exit process
     pub fn stop(&self) {
         info!("Stopping repCXL process {}. Goodbye...", self.config.id);
         self.stop_flag.store(true, Ordering::Relaxed);

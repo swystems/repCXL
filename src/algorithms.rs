@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use crate::{GroupView, RepCXLObject};
 use crate::request::{WriteRequest,ReadRequest,ReadReturn};
@@ -9,53 +9,20 @@ use crate::utils::ms_logger::MonsterStateLogger;
 pub mod best_effort;
 pub mod monster;
 
+pub(crate) struct ReadAlgorithmContext<T: Copy + PartialEq + std::fmt::Debug> {
+    pub group_view: super::GroupView,
+    pub req_queue_rx: kanal::Receiver<ReadRequest<T>>,
+    pub stop_flag: Arc<AtomicBool>,
+}
+
 pub(crate) struct WriteAlgorithmContext<T: Copy + PartialEq + std::fmt::Debug> {
-    group_view: GroupView,
-    start_instant: Instant,
-    round_time: Duration,
-    req_queue: kanal::Receiver<WriteRequest<T>>,
-    stop_flag: Arc<AtomicBool>,
-    logger: Option<MonsterStateLogger>,
+    pub group_view: GroupView,
+    pub start_instant: Instant,
+    pub round_time: Duration,
+    pub req_queue: kanal::Receiver<WriteRequest<T>>,
+    pub stop_flag: Arc<AtomicBool>,
+    pub logger: Option<MonsterStateLogger>,
 }
-
-impl WriteAlgorithmContext<()> {
-    pub fn new<T: Copy + PartialEq + std::fmt::Debug>(
-        group_view: GroupView,
-        start_instant: Instant,
-        round_time: Duration,
-        req_queue: kanal::Receiver<WriteRequest<T>>,
-        stop_flag: Arc<AtomicBool>,
-        logger: Option<MonsterStateLogger>,
-    ) -> WriteAlgorithmContext<T> {
-        WriteAlgorithmContext {
-            group_view,
-            start_instant,
-            round_time,
-            req_queue,
-            stop_flag,
-            logger,
-         }
-     }
-}
-
-// pub fn get_write_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
-//     algorithm: String,
-// ) -> fn(
-//     GroupView,
-//     Instant,
-//     Duration,
-//     kanal::Receiver<WriteRequest<T>>,
-//     Arc<AtomicBool>,
-//     Option<MonsterStateLogger>,
-// ) {
-//     match algorithm.as_str() {
-//         "async_best_effort" => best_effort::async_best_effort_write,
-//         "sync_best_effort" => best_effort::sync_best_effort,
-//         "monster" => monster::monster_write,
-//         "fmonster" => monster::fmonster_write,
-//         _ => panic!("Unknown algorithm, check config: {}", algorithm),
-//     }
-// }
 
 pub fn write_thread<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: &String,
@@ -69,25 +36,36 @@ pub fn write_thread<T: Copy + PartialEq + std::fmt::Debug>(
     }
 }
 
-
-/// Get the read algorithm thread function.
-/// Currently disabled.
-pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
-    algorithm: String,
-) -> fn(
-    GroupView,
-    SystemTime,
-    Duration,
-    kanal::Receiver<ReadRequest<T>>,
-    Arc<AtomicBool>,
+pub fn read_thread<T: Copy + PartialEq + std::fmt::Debug>(
+    algorithm: &String,
+    ractx: ReadAlgorithmContext<T>,
 ) {
     match algorithm.as_str() {
-        "async_best_effort" => best_effort::async_best_effort_read,
-        "monster" => monster::monster_read,
-        "fmonster" => monster::monster_read,
+        "async_best_effort" => best_effort::async_best_effort_read(ractx),
+        "monster | fmonster" => monster::monster_read(ractx),
         _ => panic!("Unknown read algorithm, check config: {}", algorithm),
     }
 }
+
+
+/// Get the read algorithm thread function.
+/// Currently disabled.
+// pub fn get_read_algorithm<T: Copy + PartialEq + std::fmt::Debug>(
+//     algorithm: String,
+// ) -> fn(
+//     GroupView,
+//     SystemTime,
+//     Duration,
+//     kanal::Receiver<ReadRequest<T>>,
+//     Arc<AtomicBool>,
+// ) {
+//     match algorithm.as_str() {
+//         "async_best_effort" => best_effort::async_best_effort_read,
+//         "monster" => monster::monster_read,
+//         "fmonster" => monster::monster_read,
+//         _ => panic!("Unknown read algorithm, check config: {}", algorithm),
+//     }
+// }
 
 
 pub fn read_nothread<T: Copy + PartialEq + std::fmt::Debug>(

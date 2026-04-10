@@ -5,8 +5,9 @@ use log::{info,error,debug};
 use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
 use crate::safe_memio::{safe_write, mem_readall, mem_writeall, mem_readends, MemoryError};
-use crate::{GroupView, WriteRequest, ReadRequest};
+use crate::{GroupView, WriteRequest};
 use crate::timer;
+use super::ReadAlgorithmContext;
 
 const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
 
@@ -67,19 +68,13 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
 /// Thread-reader: process read requests from repCXL object channels and sends
 /// ReadReturn. inter-thread communication might lead to overhead, prefer 
 /// _client version for better latency  
-pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
-    view: GroupView,
-    _start_time: SystemTime,
-    _round_time: Duration,
-    req_queue_rx: kanal::Receiver<ReadRequest<T>>,
-    stop_flag: Arc<AtomicBool>,
-) {
-
-     loop {
-        if stop_flag.load(Ordering::Relaxed) {
+pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(ractx: ReadAlgorithmContext<T>,) {
+    let view = ractx.group_view;
+    loop {
+        if ractx.stop_flag.load(Ordering::Relaxed) {
             break;
         }
-        match req_queue_rx.recv() {
+        match ractx.req_queue_rx.recv() {
             Ok(req) => {
                 match mem_readall(req.obj_info.offset, &view.memory_nodes) {
                     Ok(states) => {

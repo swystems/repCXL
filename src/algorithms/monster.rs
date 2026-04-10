@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, Duration};
 use log::{error, debug};
 
-use super::WriteAlgorithmContext;
+use super::{WriteAlgorithmContext, ReadAlgorithmContext};
 use crate::timer;
-use crate::request::{Wid, WriteRequest, ReadRequest, ReadReturn};
+use crate::request::{Wid, ReadReturn};
 use crate::safe_memio::{ObjectMemoryEntry, mem_writeall, mem_readall, mem_readends, MemoryError};
 use crate::utils::ms_logger;
 
@@ -546,20 +546,17 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(mut wactx: WriteAlg
 /// - async read all memory nodes and return ReadSafe or ReadDirty based
 /// on state consistency
 pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
-    view: super::GroupView,
-    _start_time: SystemTime,
-    _round_time: Duration,
-    req_queue_rx: kanal::Receiver<ReadRequest<T>>,
-    stop_flag: Arc<AtomicBool>,
+    ractx: ReadAlgorithmContext<T>,
 ) {
 
     let mut dirty_reads: Vec<Vec<Wid>> = Vec::new();
+    let view = ractx.group_view;
     
     loop {
-        if stop_flag.load(Ordering::Relaxed) {
+        if ractx.stop_flag.load(Ordering::Relaxed) {
             break;
         }
-        match req_queue_rx.recv() {
+        match ractx.req_queue_rx.recv() {
             Ok(req) => {
                 match mem_readall(req.obj_info.offset, &view.memory_nodes) {
                     Ok(states) => {
