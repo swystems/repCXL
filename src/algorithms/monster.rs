@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::{Instant, Duration};
 use log::{error, debug};
 
-use super::{AlgorithmContext};
+use super::{AlgorithmThreadContext, AlgorithmCallContext};
+use crate::shmem::object_index::ObjectInfo;
 use crate::timer;
 use crate::request::{Wid, WriteRequest, ReadRequest, ReadReturn};
 use crate::safe_memio::{ObjectMemoryEntry, mem_writeall, mem_readall, mem_readends, MemoryError};
@@ -89,26 +90,29 @@ fn is_overtime(round_start: Instant, round_time: Duration) -> bool {
 
 
 pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmContext, 
-    req_queue: kanal::Receiver<WriteRequest<T>>) {
-    // let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
-    let mut monster_state = MonsterState::Try;
-    let view = actx.group_view;
+        actx: &AlgorithmCallContext, 
+        obj_info: &crate::ObjectInfo,
+        data: T,
+        stats: &mut MonsterStats) -> Result<(), String> {
 
-    let mut logger = actx.logger.as_ref().map(|path| {
-        let mut logger = ms_logger::MonsterStateLogger::new(path);
-        logger.clear();
-        logger
-    });
+    let mut monster_state = MonsterState::Try;
+    let view = &actx.group_view;
+
+    // open log file if logging is enabled
+    let mut mslog = None;
+    if let Some(log_path) = actx.logger.as_ref() {   
+        let mut l = ms_logger::MonsterStateLogger::new(log_path);
+        l.clear();
+        mslog = Some(l);
+    };
 
     // MONSTER loop vars
-    let mut pending_req = None; // pending write request
     let mut wid = Wid::new(0,0); // write request id
-    let mut oid = 0; // object id
-    let mut stats = MonsterStats::new();
+    // let mut oid = 0; // object id
+    // let mut stats = MonsterStats::new();
 
 
-    // get shared write conflict checker
+    // get reference to shared write conflict checker (wcc)
     let mnode_state = view.get_master_node().unwrap().get_state();
     let owcc = mnode_state.get_owcc();
 
@@ -121,63 +125,26 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             timer::ROUND_SLEEP_RATIO);
 
     loop {
-        if actx.stop_flag.load(Ordering::Relaxed) {
-            monster_info!(monster_state, "Stop flag is set, exiting");
-            log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
-                stats.conflicts, 
-                stats.sync_failures, 
-                stats.empty_requests, 
-                stats.try_overtime,
-                stats.check_overtime,
-                stats.replicate_overtime);
-            break;
-        }
-
         monster_info!(monster_state,
             "Round #{round_num}, delay {:?}, obj id: {}",
             Instant::now().duration_since(round_start),
-            oid
+            obj_info.id
         );
 
         let _ = stats.update_sync_failure(round_num);
 
         // Log state transition if logging is enabled
-        if let Some(ref mut logger) = logger {
-            logger.log_monster(round_num, monster_state, oid);
+        if let Some(ref mut logger) = mslog {
+            logger.log_monster(round_num, monster_state, obj_info.id);
         }
 
         match monster_state {
             MonsterState::Try => {
-                match req_queue.try_recv() {
-                    Ok(Some(req)) => {
-                        wid = Wid::new(round_num, view.self_id);
-                        oid = req.obj_info.id;
-                        owcc.write(oid, round_num, view.self_id);
-                        monster_state = MonsterState::Check;
-
-                        pending_req = Some(req);
-
+                wid = Wid::new(round_num, view.self_id);
+                // oid = obj_info.id;
+                owcc.write(obj_info.id, round_num, view.self_id);
+                monster_state = MonsterState::Check;
                         
-                    },
-                    Ok(None) => {
-                        // no request, stay in Try state
-                            stats.empty_requests += 1;
-                    },
-                    Err(e) => match e {
-                        kanal::ReceiveError::Closed => {
-                            // the repcxl instance keeps the original sender, 
-                            // so this should occur when the instance is dropped
-                            monster_info!(monster_state, "send request queue channel closed: {}", e);
-                            break;
-                        },
-                        kanal::ReceiveError::SendClosed => {
-                            // the repcxl instance keeps the original sender, 
-                            // so this should occur when the instance is dropped
-                            monster_info!(monster_state, "send request queue channel closed: {}", e);
-                            break;
-                        }
-                    }
-                }
                 if is_overtime(round_start, actx.round_time) {
                     stats.try_overtime += 1;
                 }
@@ -185,31 +152,23 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
             // Same as Try but don't fetch new request, use the pending one
             MonsterState::Retry => {
-                if pending_req.is_none() {
-                    error!("No pending request in Retry state, disallowed state. Exiting.");
-                    break;
-                }
-
-                let req = pending_req.as_ref().unwrap();
+                
                 wid = Wid::new(round_num, view.self_id);
-                oid = req.obj_info.id;
-                owcc.write(oid, round_num, view.self_id);
+                // oid = obj_info.id;
+                owcc.write(obj_info.id, round_num, view.self_id);
 
                 monster_state = MonsterState::Check;
+                if is_overtime(round_start, actx.round_time) {
+                    stats.try_overtime += 1;
+                }
             },
             
             MonsterState::Check => {
-                if owcc.is_last(oid, round_num, wid.round_num, wid.process_id) {
+                if owcc.is_last(obj_info.id, round_num, wid.round_num, wid.process_id) {
                     // current process is the last writer
-                    monster_info!(monster_state, "Process {} is the last writer for object {} in round {}", view.self_id, oid, round_num);
+                    monster_info!(monster_state, "Process {} is the last writer for object {} in round {}", view.self_id, obj_info.id, round_num);
+                    monster_state = MonsterState::Replicate;
 
-                    // if !is_overtime(round_start, round_time) {
-                        // on time, proceed to Replicate state
-                        monster_state = MonsterState::Replicate;
-                    // } else {
-                    //     // overtime (sync failure), wait for next round
-                    //     monster_state = MonsterState::Check;
-                    // }
                 }
                 else {
                     // not the last writer
@@ -221,45 +180,16 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             },
 
             MonsterState::Replicate => {
-                if pending_req.is_none() {
-                    error!("No pending request in Replicate state, disallowed state. Exiting.");
-                    break;
+                let ome = ObjectMemoryEntry::new(wid, data);
+
+                let result = mem_writeall(obj_info.offset, ome, &view.memory_nodes)
+                    .map_err(|MemoryError(mnid)| format!("Memory node {} failed during write replication", mnid));
+
+                if is_overtime(round_start, actx.round_time) {
+                    stats.replicate_overtime += 1;
                 }
-                
-                let req = pending_req.as_ref().unwrap();
-                let ome = ObjectMemoryEntry::new(wid, req.data);
 
-
-                // strange idea to reduce conflict 
-                // let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-                // let first_byte_of_req_data = unsafe { std::ptr::read((&raw const req.data) as *const u8) };
-                // if ts % 4 != first_byte_of_req_data as u128 % 4 {
-                //     unsafe {
-                //     sched_yield();   
-                //     }
-                // }
-
-                // for _ in 0..2 { // retry replication a few times if it fails, to handle transient failures
-                    match mem_writeall(req.obj_info.offset, ome, &view.memory_nodes) {
-                        Ok(()) => {
-                            // send ack to client
-                            if let Err(_) = req.ack_tx.send(true) {
-                                error!("Failed to send ack");
-                            }
-                            monster_state = MonsterState::Try;
-                        },
-                        Err(MemoryError(memory_node_id)) => {
-                            error!("Memory node {} failed during write replication", memory_node_id);
-                            break;
-                        }
-                    }
-
-                    if is_overtime(round_start, actx.round_time) {
-                        stats.replicate_overtime += 1;
-                    }
-                // }
-                pending_req = None;
-
+                return result;
             },
 
             // wait for the replicate phase of the conflicting process to finish
@@ -271,14 +201,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             // check if the conflicting write has been fully replicated, otherwise
             // retry the write.
             MonsterState::PostConflictCheck => {
-                if pending_req.is_none() {
-                    error!("No pending request in PostConflictCheck state, disallowed state. Exiting.");
-                    break;
-                }
-                
-                let req = pending_req.as_ref().unwrap();
-                
-                match mem_readall(req.obj_info.offset, &view.memory_nodes) {
+                match mem_readall(obj_info.offset, &view.memory_nodes) {
                     Ok(omes) => {
                         // Check if any wid in omes is smaller than the current
                         // wid
@@ -287,25 +210,18 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
                         if any_smaller {                            
                             monster_info!(monster_state,
                                 "Found wid smaller than current wid={:?} for object {}, retrying to write",
-                                wid, req.obj_info.id
+                                wid, obj_info.id
                             );
-
-
                             monster_state = MonsterState::Retry; 
+                        
                         } else {
                             monster_info!(monster_state, "State up to date");
-                            // send ack to client
-                            if let Err(_) = req.ack_tx.send(true) {
-                                error!("Failed to send ack");
-                            }   
-
-                            pending_req = None;
-                            monster_state = MonsterState::Try;
+                            return Ok(());
                         }
                     },
                     Err(MemoryError(memory_node_id)) => {
                         monster_error!(monster_state, "Memory node {} failed during post-conflict read", memory_node_id);
-                        break;
+                        return Err(format!("Memory node {} failed during post-conflict read", memory_node_id));
                     }
                 }
             }
@@ -320,40 +236,16 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
 
 pub fn monster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmContext, 
+    actx: &AlgorithmThreadContext, 
     req_queue: kanal::Receiver<WriteRequest<T>>) {
-    // let mut round_num = 1; // start from 1 to diff from zero-initialized ObjectMemoryEntry
-    let mut monster_state = MonsterState::Try;
-    let view = actx.group_view;
-
-    let mut logger = actx.logger.as_ref().map(|path| {
-        let mut logger = ms_logger::MonsterStateLogger::new(path);
-        logger.clear();
-        logger
-    });
 
     // MONSTER loop vars
-    let mut pending_req = None; // pending write request
-    let mut wid = Wid::new(0,0); // write request id
-    let mut oid = 0; // object id
     let mut stats = MonsterStats::new();
-
-
-    // get shared write conflict checker
-    let mnode_state = view.get_master_node().unwrap().get_state();
-    let owcc = mnode_state.get_owcc();
-
-    let round_zero = actx.start_instant;
-
-    // there might be some delays before we get here, wait till start of the next round 
-    let (mut round_num, mut round_start) = timer::wait_next_round(
-            round_zero, 
-            actx.round_time, 
-            timer::ROUND_SLEEP_RATIO);
-
+    let actx_call = actx.to_call_context();
     loop {
         if actx.stop_flag.load(Ordering::Relaxed) {
-            monster_info!(monster_state, "Stop flag is set, exiting");
+            // monster_info!(monster_state, "Stop flag is set, exiting");
+            log::info!("Stop flag is set, exiting");
             log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
                 stats.conflicts, 
                 stats.sync_failures, 
@@ -364,195 +256,38 @@ pub fn monster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
             break;
         }
 
-        monster_info!(monster_state,
-            "Round #{round_num}, delay {:?}, obj id: {}",
-            Instant::now().duration_since(round_start),
-            oid
-        );
+        // let _ = stats.update_sync_failure(round_num);
 
-        let _ = stats.update_sync_failure(round_num);
-
-        // Log state transition if logging is enabled
-        if let Some(ref mut logger) = logger {
-            logger.log_monster(round_num, monster_state, oid);
-        }
-
-        match monster_state {
-            MonsterState::Try => {
-                match req_queue.try_recv() {
-                    Ok(Some(req)) => {
-                        wid = Wid::new(round_num, view.self_id);
-                        oid = req.obj_info.id;
-                        owcc.write(oid, round_num, view.self_id);
-                        monster_state = MonsterState::Check;
-
-                        pending_req = Some(req);
-
-                        
-                    },
-                    Ok(None) => {
-                        // no request, stay in Try state
-                            stats.empty_requests += 1;
-                    },
-                    Err(e) => match e {
-                        kanal::ReceiveError::Closed => {
-                            // the repcxl instance keeps the original sender, 
-                            // so this should occur when the instance is dropped
-                            monster_info!(monster_state, "send request queue channel closed: {}", e);
-                            break;
-                        },
-                        kanal::ReceiveError::SendClosed => {
-                            // the repcxl instance keeps the original sender, 
-                            // so this should occur when the instance is dropped
-                            monster_info!(monster_state, "send request queue channel closed: {}", e);
-                            break;
-                        }
-                    }
-                }
-                if is_overtime(round_start, actx.round_time) {
-                    stats.try_overtime += 1;
-                }
+        match req_queue.try_recv() {
+            Ok(Some(req)) => {
+                monster_write(&actx_call, &req.obj_info, req.data, &mut stats);  
             },
-
-            // Same as Try but don't fetch new request, use the pending one
-            MonsterState::Retry => {
-                if pending_req.is_none() {
-                    error!("No pending request in Retry state, disallowed state. Exiting.");
+            Ok(None) => {
+                // no request, stay in Try state
+                    stats.empty_requests += 1;
+            },
+            Err(e) => match e {
+                kanal::ReceiveError::Closed => {
+                    // the repcxl instance keeps the original sender, 
+                    // so this should occur when the instance is dropped
+                    log::info!("send request queue channel closed: {}", e);
                     break;
-                }
-
-                let req = pending_req.as_ref().unwrap();
-                wid = Wid::new(round_num, view.self_id);
-                oid = req.obj_info.id;
-                owcc.write(oid, round_num, view.self_id);
-
-                monster_state = MonsterState::Check;
-            },
-            
-            MonsterState::Check => {
-                if owcc.is_last(oid, round_num, wid.round_num, wid.process_id) {
-                    // current process is the last writer
-                    monster_info!(monster_state, "Process {} is the last writer for object {} in round {}", view.self_id, oid, round_num);
-
-                    // if !is_overtime(round_start, round_time) {
-                        // on time, proceed to Replicate state
-                        monster_state = MonsterState::Replicate;
-                    // } else {
-                    //     // overtime (sync failure), wait for next round
-                    //     monster_state = MonsterState::Check;
-                    // }
-                }
-                else {
-                    // not the last writer
-                    monster_state = MonsterState::Wait;
-                }
-                if is_overtime(round_start, actx.round_time) {
-                    stats.check_overtime += 1;
-                }
-            },
-
-            MonsterState::Replicate => {
-                if pending_req.is_none() {
-                    error!("No pending request in Replicate state, disallowed state. Exiting.");
+                },
+                kanal::ReceiveError::SendClosed => {
+                    // the repcxl instance keeps the original sender, 
+                    // so this should occur when the instance is dropped
+                    log::info!("send request queue channel closed: {}", e);
                     break;
-                }
-                
-                let req = pending_req.as_ref().unwrap();
-                let ome = ObjectMemoryEntry::new(wid, req.data);
-
-
-                // strange idea to reduce conflict 
-                // let ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-                // let first_byte_of_req_data = unsafe { std::ptr::read((&raw const req.data) as *const u8) };
-                // if ts % 4 != first_byte_of_req_data as u128 % 4 {
-                //     unsafe {
-                //     sched_yield();   
-                //     }
-                // }
-
-                // for _ in 0..2 { // retry replication a few times if it fails, to handle transient failures
-                    match mem_writeall(req.obj_info.offset, ome, &view.memory_nodes) {
-                        Ok(()) => {
-                            // send ack to client
-                            if let Err(_) = req.ack_tx.send(true) {
-                                error!("Failed to send ack");
-                            }
-                            monster_state = MonsterState::Try;
-                        },
-                        Err(MemoryError(memory_node_id)) => {
-                            error!("Memory node {} failed during write replication", memory_node_id);
-                            break;
-                        }
-                    }
-
-                    if is_overtime(round_start, actx.round_time) {
-                        stats.replicate_overtime += 1;
-                    }
-                // }
-                pending_req = None;
-
-            },
-
-            // wait for the replicate phase of the conflicting process to finish
-            MonsterState::Wait => {
-                monster_state = MonsterState::PostConflictCheck;
-                stats.conflicts += 1;
-            },
-
-            // check if the conflicting write has been fully replicated, otherwise
-            // retry the write.
-            MonsterState::PostConflictCheck => {
-                if pending_req.is_none() {
-                    error!("No pending request in PostConflictCheck state, disallowed state. Exiting.");
-                    break;
-                }
-                
-                let req = pending_req.as_ref().unwrap();
-                
-                match mem_readall(req.obj_info.offset, &view.memory_nodes) {
-                    Ok(omes) => {
-                        // Check if any wid in omes is smaller than the current
-                        // wid
-                        let any_smaller = omes.iter().any(|ome: &ObjectMemoryEntry<T>| ome.wid < wid);
-
-                        if any_smaller {                            
-                            monster_info!(monster_state,
-                                "Found wid smaller than current wid={:?} for object {}, retrying to write",
-                                wid, req.obj_info.id
-                            );
-
-
-                            monster_state = MonsterState::Retry; 
-                        } else {
-                            monster_info!(monster_state, "State up to date");
-                            // send ack to client
-                            if let Err(_) = req.ack_tx.send(true) {
-                                error!("Failed to send ack");
-                            }   
-
-                            pending_req = None;
-                            monster_state = MonsterState::Try;
-                        }
-                    },
-                    Err(MemoryError(memory_node_id)) => {
-                        monster_error!(monster_state, "Memory node {} failed during post-conflict read", memory_node_id);
-                        break;
-                    }
                 }
             }
         }
-
-        (round_num, round_start) = timer::wait_next_round(
-            round_zero, 
-            actx.round_time, timer::ROUND_SLEEP_RATIO);
-
     }
 }
 
 
 
 pub fn fmonster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmContext, 
+    actx: AlgorithmThreadContext, 
     req_queue: kanal::Receiver<WriteRequest<T>>) {
 
     let mut monster_state = MonsterState::Try;
@@ -799,7 +534,7 @@ pub fn fmonster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
 /// Client-reader: clients perform read operation directly i.e. no read thread
 /// processing requests
 pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: &AlgorithmContext,
+    actx: &AlgorithmCallContext,
     obj_info: &crate::ObjectInfo,
 ) -> Result<ReadReturn<T>, String> {
 
@@ -843,7 +578,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
 /// - pull read requests from queue (blocking) 
 /// - call monster_read and return result to client
 pub fn monster_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmContext,
+    actx: AlgorithmThreadContext,
     req_queue: kanal::Receiver<ReadRequest<T>>
 ) {
     
@@ -854,7 +589,7 @@ pub fn monster_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
 
         match req_queue.recv() {
             Ok(req) => {
-                match monster_read(&actx, &req.obj_info) {
+                match monster_read(&actx.to_call_context(), &req.obj_info) {
                     Ok(result) => {
                         
                         if let Err(e) = req.ack_tx.send(result) {

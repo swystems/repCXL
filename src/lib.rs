@@ -426,7 +426,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     ///
     /// - algorithm: protocol used for the read operation
     /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
-    /// pipeline mode is still blocking, move to async
+    /// pipeline mode is still blocking, move to kanal::async_channel or similar
     pub fn write_object(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
         
         if self.config.pipeline {
@@ -443,16 +443,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// - read_retries: number of times to retry the operation if it returns a
     ///   dirty read
     /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
-    /// pipeline mode is still blocking, move to async
+    /// pipeline mode is still blocking, move to kanal::async_channel
     pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
         // build alg context
-        let actx = algorithms::AlgorithmContext {
-                        group_view: self.view.clone(),
+        let actx = algorithms::AlgorithmCallContext {
+                        group_view: &self.view,
                         start_instant: self.start_instant,
                         round_time: Duration::from_nanos(self.config.round_time),
                         read_offset: self.config.read_offset,
-                        stop_flag: self.stop_flag.clone(),
-                        logger: self.logger_path.clone(),
+                        logger: self.logger_path.as_deref(),
                     };
         
         // read is parametrized to pipeline mode config
@@ -498,7 +497,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // and keep the tx queue in main state
 
             // build thread context
-            let wactx = algorithms::AlgorithmContext {
+            let wactx = algorithms::AlgorithmThreadContext {
                 group_view: self.view.clone(),
                 start_instant: self.start_instant,
                 round_time: Duration::from_nanos(self.config.round_time),

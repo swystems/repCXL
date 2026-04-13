@@ -7,7 +7,7 @@ use crate::utils::ms_logger::MonsterStateLogger;
 use crate::safe_memio::{mem_writeall, mem_readends, MemoryError};
 use crate::{GroupView, WriteRequest, ReadRequest};
 use crate::timer;
-use super::AlgorithmContext;
+use super::AlgorithmThreadContext;
 
 const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
 
@@ -116,7 +116,7 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
 /// ReadReturn. inter-thread communication might lead to overhead, prefer 
 /// _client version for better latency  
 pub fn async_best_effort_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmContext,
+    actx: AlgorithmThreadContext,
     req_queue: kanal::Receiver<ReadRequest<T>>,
 ) {
     let view = actx.group_view;
