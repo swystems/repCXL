@@ -127,7 +127,7 @@ impl ObjectWCC {
     /// Last writer criteria: 
     /// - the winning process has written in the largest round smaller than
     /// the current round
-    /// - in case of conflicts, the smallest pid wins
+    /// - in case of conflicts, the larger pid wins
     pub fn is_last(&mut self, oid_in: usize, current_round:u64, round_in: u64, pid_in: usize) -> bool {
         if pid_in > MAX_PROCESSES {
             return false; // invalid pid
@@ -149,11 +149,12 @@ impl ObjectWCC {
                 continue;
             }
 
+            // @TODO: use Wid comparison wid1 > wid2?
             if current_round > entry.round && entry.round > round_in {
                 return false; // another process has written in a larger round
             }
-            if entry.round == round_in && i < pid_in {
-                return false; // another process has lower pid
+            if entry.round == round_in && i > pid_in {
+                return false; // another process has larger pid
             }
         }
         true
@@ -182,12 +183,12 @@ impl ProcessBitmapUncached {
     
     /// Cache flush the bitmap to ensure write is committed to memory
     unsafe fn cfw(&self) {
-        // safe_memio::cache_flush_write(self.data.as_ptr() as *const u8, self.size);
+        safe_memio::cache_flush_write(self.data.as_ptr() as *const u8, self.size);
     }
 
     /// Cache flush the bitmap (=cache invalidate) to ensure subsequent read from memory
     unsafe fn cfr(&self) {
-        // safe_memio::cache_flush_read(self.data.as_ptr() as *const u8, self.size);
+        safe_memio::cache_flush_read(self.data.as_ptr() as *const u8, self.size);
     }
 
     fn set(&mut self, pid: usize, val: bool) {
@@ -254,8 +255,8 @@ impl FastWCC {
         if oid >= MAX_OBJECTS || pid_set >= MAX_PROCESSES || pid_unset >= MAX_PROCESSES {
             panic!("Invalid object ID or process ID");
         }
-        self.obm[oid].set(pid_set, true);
         self.obm[oid].set(pid_unset, false);
+        self.obm[oid].set(pid_set, true);
         unsafe { self.obm[oid].cfw(); }
     }
 
