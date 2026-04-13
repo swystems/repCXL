@@ -32,7 +32,7 @@ round_time = 1000
 algorithm = "async_best_effort"
 
 # Enable pipelined write path (true/false)
-pipeline = true
+pipeline = false
 
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = 0

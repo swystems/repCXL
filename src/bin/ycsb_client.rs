@@ -160,7 +160,7 @@ fn main() {
             rep_cxl::utils::ycsb::OpType::Read => {
                 let obj = index.get(&op.key).expect("Key not found in index");
                 let start = std::time::Instant::now();
-                match obj.read() {
+                match rcxl.read_object(obj) {
                     Ok(rr) => {
                         match rr {
                             ReadReturn::ReadDirty(_) => dirty_reads += 1,
@@ -179,7 +179,7 @@ fn main() {
 
                 if let Some(obj) = index.get(&op.key) {
                     let start = std::time::Instant::now();
-                    if let Err(e) = obj.write( value) {
+                    if let Err(e) = rcxl.write_object(obj, value) {
                         error!("write error for object {}: {}", op.key, e);
                         write_errors += 1;
                     }

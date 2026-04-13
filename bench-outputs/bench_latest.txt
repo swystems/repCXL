@@ -1,19 +1,19 @@
-Date: 20260410_1851
+Date: 20260413_1206
 YCSB workload: workloada_64_large
 
 ============= RepCXL configuration =============
 processes = [0]
 algorithm = "async_best_effort"
-pipeline = true
+pipeline = false
 round_time = 1000 
 read_retries = 0
 # core_affinity = 2 
 ============= Benchmark Results =============
 
 === hardanger.dat ===
-Ops: 2010000  Time: 7.97s  Throughput: 252137.19 ops/sec
-Dirty reads: 0 / 1005827 (0.000%)
+Ops: 2010000  Time: 3.00s  Throughput: 670686.84 ops/sec
+Dirty reads: 0 / 1004448 (0.000%)
                  avg       P99.99         P100
-Read         3.83μs     16.42μs       3.72ms
-Write         3.73μs     16.11μs       3.46ms
+Read         1.94μs      7.92μs       2.50ms
+Write           864ns      5.63μs       2.45ms
 

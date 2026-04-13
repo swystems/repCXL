@@ -373,49 +373,113 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         None
     }
 
-    /// Use the config-specified write algorithm to write an object.
-    /// Uses direct no-thread path when available, otherwise falls back to
-    /// channel-based object write.
-    pub fn write_object(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
-        match algorithms::write(&self.config.algorithm, &self.view, obj, data) {
-            Ok(()) => Ok(()),
-            Err(_) => obj.write(data),
+
+    fn write_threaded(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
+        // let client_start = Instant::now();
+        let (ack_tx, ack_rx) = kanal::unbounded();
+        let req = WriteRequest::new(obj.info, data, ack_tx);
+        // let trace_id = req.trace_id;
+
+        self.wreq_queue_tx
+            .send(req)
+            .map_err(|e| format!("Failed to send to object queue: {}", e))?;
+        // let send_to_worker = client_start.elapsed();
+        // let ack_wait_start = Instant::now();
+
+        // std::thread::sleep(Duration::from_millis(10));
+        // wait for ack
+        let result = match ack_rx.recv() {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("Failed write operation".into()),
+            Err(e) => Err(format!("Failed to receive ack: {}", e)),
+        };
+
+        // if trace_id % Self::WRITE_TRACE_SAMPLE_RATE == 0 {
+        //     debug!(
+        //         "[WRITE_TRACE][client] id={} send_to_worker={}ns ack_wait={}ns total={}ns",
+        //         trace_id,
+        //         send_to_worker.as_nanos(),
+        //         ack_wait_start.elapsed().as_nanos(),
+        //         client_start.elapsed().as_nanos(),
+        //     );
+        // }
+
+        result
+    }
+
+    fn read_threaded(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
+        let (ack_tx, ack_rx) = kanal::unbounded();
+        let req = ReadRequest::new(obj.info, ack_tx);
+        self.rreq_queue_tx
+            .send(req)
+            .map_err(|e| format!("Failed to send to object queue: {}", e))
+            .unwrap();
+
+        // wait for ack
+        match ack_rx.recv() {
+            Ok(return_val) => Ok(return_val),
+            Err(e) => Err(format!("Failed to receive read ack: {}", e)),
         }
     }
 
-    /// Use the config-specified read algorithm to read an object. 
-    /// Retries the operation up to `config.read_retries` times if it returns a
-    /// dirty read.
+    /// Write to an object. Behavior depends on configuration parameters: 
+    ///
+    /// - algorithm: protocol used for the read operation
+    /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
+    /// pipeline mode is still blocking, move to async
+    pub fn write_object(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
+        
+        if self.config.pipeline {
+            self.write_threaded(obj, data)
+        }
+        else {
+            algorithms::write(&self.config.algorithm, &self.view, obj, data)
+        }
+    }
+
+    /// Read from an object. Behavior depends on configuration parameters: 
+    ///
+    /// - algorithm: protocol used for the read operation
+    /// - read_retries: number of times to retry the operation if it returns a
+    ///   dirty read
+    /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
+    /// pipeline mode is still blocking, move to async
     pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
         // build alg context
         let actx = algorithms::AlgorithmContext {
-                group_view: self.view.clone(),
-                start_instant: self.start_instant,
-                round_time: Duration::from_nanos(self.config.round_time),
-                read_offset: self.config.read_offset,
-                stop_flag: self.stop_flag.clone(),
-                logger: self.logger_path.clone(),
-            };
+                        group_view: self.view.clone(),
+                        start_instant: self.start_instant,
+                        round_time: Duration::from_nanos(self.config.round_time),
+                        read_offset: self.config.read_offset,
+                        stop_flag: self.stop_flag.clone(),
+                        logger: self.logger_path.clone(),
+                    };
+        
+        // read is parametrized to pipeline mode config
+        let read_once = || {
+            if self.config.pipeline {
+                self.read_threaded(obj)
+            } else {
+                algorithms::read(&self.config.algorithm, &actx, obj)
+            }
+        };
 
-        let mut res = algorithms::read(
-                            &self.config.algorithm,
-                            &actx,
-                            obj);
-        // retry if dirty with offset time
-        for _ in 0..self.config.read_retries{
-            res = algorithms::read(
-                            &self.config.algorithm,
-                            &actx,
-                            obj); 
-                
+        let mut res = read_once();
+        // keep retrying if we get read-dirty
+        for _ in 0..self.config.read_retries {
             match res {
-                Ok(ReadReturn::ReadDirty(_)) => continue,
+                Ok(ReadReturn::ReadDirty(_)) => {
+                    res = read_once();
+                    continue
+                },
                 _ => break,
             }
         }
 
         res
     }
+
+
 
     /// Start the repCXL protocol threads without initial synchronization (for async protocols)
     pub fn start(&mut self) {
