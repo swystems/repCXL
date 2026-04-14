@@ -20,24 +20,24 @@ pub(crate) struct AlgorithmThreadContext {
 
 
 impl AlgorithmThreadContext {
-    pub fn to_call_context(&self, algorithm: &str, stats: monster::MonsterStats) -> AlgorithmCallContext<'_> {
+    pub fn to_call_context(&self, algorithm: &str, stats: monster::MonsterStats) -> AlgorithmCallContext {
         AlgorithmCallContext {
             algorithm: algorithm.to_string(),
             start_instant: self.start_instant,
             round_time: self.round_time,
             read_offset: self.read_offset,
-            logger: self.logger.as_deref(),
+            logger: self.logger.clone(),
             stats: stats,
         }
     }
 }
 
-pub(crate) struct AlgorithmCallContext<'a> {
+pub(crate) struct AlgorithmCallContext {
     pub algorithm: String,
     pub start_instant: Instant,
     pub round_time: Duration,
     pub read_offset: Option<f64>,
-    pub logger: Option<&'a str>,
+    pub logger: Option<String>,
     pub stats: monster::MonsterStats,
 }
 

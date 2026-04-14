@@ -14,6 +14,7 @@ pub struct MonsterStateLogEntry {
     pub object_id: usize,
 }
 
+// #[derive(Debug, Clone, PartialEq)]
 pub struct MonsterStateLogger {
     log: File,
     // path: String,

@@ -150,7 +150,7 @@ impl<T: Copy> RepCXLObject<T> {
 
 /// Main RepCXL structure in local memory/cache for each process
 /// current version only supports objects of type T
-pub struct RepCXL<'a, T> {
+pub struct RepCXL<T> {
     pub config: RepCXLConfig,
     num_of_objects: usize,
     view: GroupView,
@@ -158,13 +158,11 @@ pub struct RepCXL<'a, T> {
     wreq_queue_rx: Option<kanal::Receiver<WriteRequest<T>>>,
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
-    start_instant: Instant,
     stop_flag: Arc<AtomicBool>,
-    logger_path: Option<String>,
-    algorithm_ctx: algorithms::AlgorithmCallContext<'a>,
+    algorithm_ctx: algorithms::AlgorithmCallContext,
 }
 
-impl<'a, T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<'a, T> {
+impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
     /// Create a new empty repCXL instance
     pub fn new(config: RepCXLConfig) -> Self {
@@ -205,9 +203,7 @@ impl<'a, T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<'a, T> {
             wreq_queue_rx: Some(wrx),
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
-            start_instant: Instant::now(),
             stop_flag: Arc::new(AtomicBool::new(false)),
-            logger_path: None,
             algorithm_ctx: acfg,
         }
     }
@@ -217,7 +213,7 @@ impl<'a, T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<'a, T> {
     pub fn enable_file_log(&mut self, path: &str) {
         let mut log = utils::ms_logger::MonsterStateLogger::new(path);
         log.clear();
-        self.logger_path = Some(path.to_string());
+        self.algorithm_ctx.logger = Some(path.to_string());
     }
 
     pub fn register_process(&mut self, pid: u32) {
@@ -509,11 +505,11 @@ impl<'a, T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<'a, T> {
             // build thread context
             let wactx = algorithms::AlgorithmThreadContext {
                 group_view: self.view.clone(),
-                start_instant: self.start_instant,
+                start_instant: self.algorithm_ctx.start_instant,
                 round_time: Duration::from_nanos(self.config.round_time),
                 read_offset: self.config.read_offset,
                 stop_flag: self.stop_flag.clone(),
-                logger: self.logger_path.clone(),
+                logger: self.algorithm_ctx.logger.clone(),
             };
 
             let ractx = wactx.clone();
@@ -579,7 +575,7 @@ impl<'a, T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<'a, T> {
             }
 
             let start_instant = timer::system_time_to_instant(start_time);
-            self.start_instant = start_instant;
+            self.algorithm_ctx.start_instant = start_instant;
 
             timer::wait_start_time(start_instant, timer::ROUND_SLEEP_RATIO);
 

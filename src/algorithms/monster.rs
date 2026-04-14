@@ -114,6 +114,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
         mslog = Some(l);
     };
 
+
     // MONSTER loop vars
     let mut wid = Wid::new(0,0); // write request id
     // let mut oid = 0; // object id
@@ -140,6 +141,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
         );
 
         let _ = stats.update_sync_failure(round_num);
+
 
         // Log state transition if logging is enabled
         if let Some(ref mut logger) = mslog {

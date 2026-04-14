@@ -2,12 +2,12 @@ use std::fs::File;
 use rep_cxl::RepCXL;
 use rep_cxl::RepCXLConfig;
 
-pub const TEST_MEMORY_SIZE: usize = 1024 * 1024; // 1 MiB
+pub const TEST_MEMORY_SIZE: usize = 2 * 1024 * 1024; // 1 MiB
 pub const TEST_CHUNK_SIZE: usize = 64;
 pub const TEST_ALGORITHM: &str = "monster";
 pub const TEST_ROUND_TIME: u64 = 10_000_000; // 10 ms
 
-pub fn test_config(node_paths: Vec<&str>) -> RepCXLConfig {
+pub fn test_config(node_paths: Vec<&'static str>) -> RepCXLConfig {
     RepCXLConfig {
         id: 0,
         mem_nodes: node_paths.into_iter().map(|s| s.to_string()).collect(),
@@ -16,6 +16,7 @@ pub fn test_config(node_paths: Vec<&str>) -> RepCXLConfig {
         processes: vec![], 
         algorithm: TEST_ALGORITHM.to_string(),
         round_time: TEST_ROUND_TIME,
+        pipeline: false, // no threads
         ..Default::default()
     }
 }
@@ -30,14 +31,14 @@ pub fn cleanup_tmpfs_file(path: &str) {
 }
 
 
-pub fn single_rcxl(id: usize, node_paths: Vec<&str>) -> RepCXL<u64> {
+pub fn single_rcxl(id: usize, node_paths: Vec<&'static str>) -> RepCXL<u64> {
     let mut config = test_config(node_paths);
     config.id = id as i32;
     config.processes = vec![id as u32];
     RepCXL::<u64>::new(config)
 }
 
-pub fn multi_rcxl(num: usize, node_paths: Vec<&str>) -> Vec<RepCXL<u64>> {
+pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
     let mut processes = Vec::new();
     for i in 0..num {
         let mut rcxl = single_rcxl(i, node_paths.clone());
@@ -47,6 +48,29 @@ pub fn multi_rcxl(num: usize, node_paths: Vec<&str>) -> Vec<RepCXL<u64>> {
         processes.push(rcxl);
 
         
+    }
+    processes
+}
+
+
+pub fn multi_rcxl2(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
+    let mut processes = Vec::new();
+    for i in 0..num {
+        let mut rcxl = single_rcxl(i, node_paths.clone());
+        if i == 0 {
+            rcxl.init_state(); // coordinator inits state
+        }
+
+        // register processes
+        for j in 0..num {
+            rcxl.register_process(j as u32);
+        }
+
+        // std::thread::spawn(move || {
+        //     rcxl.sync_start();
+        // });
+
+        processes.push(rcxl);
     }
     processes
 }
