@@ -20,33 +20,27 @@ pub(crate) struct AlgorithmThreadContext {
 
 
 impl AlgorithmThreadContext {
-    pub fn to_call_context(&self) -> AlgorithmCallContext {
+    pub fn to_call_context(&self, algorithm: &str, stats: monster::MonsterStats) -> AlgorithmCallContext<'_> {
         AlgorithmCallContext {
-            group_view: &self.group_view,
+            algorithm: algorithm.to_string(),
             start_instant: self.start_instant,
             round_time: self.round_time,
             read_offset: self.read_offset,
             logger: self.logger.as_deref(),
+            stats: stats,
         }
     }
 }
+
 pub(crate) struct AlgorithmCallContext<'a> {
-    pub group_view: &'a super::GroupView,
+    pub algorithm: String,
     pub start_instant: Instant,
     pub round_time: Duration,
     pub read_offset: Option<f64>,
     pub logger: Option<&'a str>,
+    pub stats: monster::MonsterStats,
 }
 
-
-
-// pub(crate) struct WriteAlgorithmContext<T: Copy + PartialEq + std::fmt::Debug> {
-//     pub group_view: GroupView,
-//     pub start_instant: Instant,
-//     pub round_time: Duration,
-//     pub stop_flag: Arc<AtomicBool>,
-//     pub logger: Option<String>,
-// }
 
 pub fn write_thread<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: &String,
@@ -55,8 +49,8 @@ pub fn write_thread<T: Copy + PartialEq + std::fmt::Debug>(
 ) {
     match algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_write_thread(actx.group_view, req_queue, actx.stop_flag),
-        "monster" => monster::monster_write(actx, req_queue),
-        "fmonster" => monster::fmonster_write(actx, req_queue),
+        "monster" => monster::monster_write_thread(actx, req_queue),
+        "fmonster" => monster::fmonster_write_thread(actx, req_queue),
         _ => panic!("Unknown write algorithm, check config: {}", algorithm),
     }
 }
@@ -76,26 +70,27 @@ pub fn read_thread<T: Copy + PartialEq + std::fmt::Debug>(
 
 
 pub fn read<T: Copy + PartialEq + std::fmt::Debug>(
-    algorithm: &String,
     actx: &AlgorithmCallContext,
+    view: &GroupView,
     obj: &RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
-    match algorithm.as_str() {
-        "async_best_effort" => best_effort::async_best_effort_read(&actx.group_view, &obj.info),
-        "monster" | "fmonster" => monster::monster_read(actx, &obj.info),
-        _ => panic!("Unknown read algorithm, check config: {}", algorithm),
+    match actx.algorithm.as_str() {
+        "async_best_effort" => best_effort::async_best_effort_read(&view, &obj.info),
+        "monster" | "fmonster" => monster::monster_read(actx, view, &obj.info),
+        _ => panic!("Unknown read algorithm, check config: {}", actx.algorithm),
     }
 }
 
 pub fn write<T: Copy + PartialEq + std::fmt::Debug>(
-    algorithm: &String,
-    group_view: &GroupView,
+    actx: &mut AlgorithmCallContext,
+    view: &GroupView,
     obj: &RepCXLObject<T>,
     data: T,
 ) -> Result<(), String> {
-    match algorithm.as_str() {
-        "async_best_effort" => best_effort::async_best_effort_write(group_view, &obj.info, data),
-        "monster" => monster::monster_write(&actx, &obj.info, data, &mut stats),
-        _ => Err(format!("write_nothread not supported for algorithm '{}'", algorithm)),
+    match actx.algorithm.as_str() {
+        "async_best_effort" => best_effort::async_best_effort_write(view, &obj.info, data),
+        "monster"  => monster::monster_write(actx, view, &obj.info, data),
+        "fmonster" => monster::fmonster_write(actx, view, &obj.info, data),
+        _ => Err(format!("write not supported for algorithm '{}'", actx.algorithm)),
     }
 }

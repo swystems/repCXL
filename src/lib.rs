@@ -150,7 +150,7 @@ impl<T: Copy> RepCXLObject<T> {
 
 /// Main RepCXL structure in local memory/cache for each process
 /// current version only supports objects of type T
-pub struct RepCXL<T> {
+pub struct RepCXL<'a, T> {
     pub config: RepCXLConfig,
     num_of_objects: usize,
     view: GroupView,
@@ -161,9 +161,10 @@ pub struct RepCXL<T> {
     start_instant: Instant,
     stop_flag: Arc<AtomicBool>,
     logger_path: Option<String>,
+    algorithm_ctx: algorithms::AlgorithmCallContext<'a>,
 }
 
-impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
+impl<'a, T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<'a, T> {
 
     /// Create a new empty repCXL instance
     pub fn new(config: RepCXLConfig) -> Self {
@@ -187,6 +188,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let (wtx, wrx) = kanal::unbounded();
         let (rtx, rrx) = kanal::unbounded();
 
+        let acfg = algorithms::AlgorithmCallContext {
+            algorithm: config.algorithm.clone(),
+            start_instant: Instant::now(), // will be updated at sync_start
+            round_time: Duration::from_nanos(config.round_time),
+            read_offset: config.read_offset,
+            logger: None, // will be set if file logging is enabled
+            stats: algorithms::monster::MonsterStats::new(),
+        };
+
         RepCXL {
             config,
             num_of_objects: 0,
@@ -195,9 +205,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             wreq_queue_rx: Some(wrx),
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
-            start_instant: std::time::Instant::now(),
+            start_instant: Instant::now(),
             stop_flag: Arc::new(AtomicBool::new(false)),
             logger_path: None,
+            algorithm_ctx: acfg,
         }
     }
 
@@ -427,13 +438,13 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// - algorithm: protocol used for the read operation
     /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
     /// pipeline mode is still blocking, move to kanal::async_channel or similar
-    pub fn write_object(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
+    pub fn write_object(&mut self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
         
         if self.config.pipeline {
             self.write_threaded(obj, data)
         }
         else {
-            algorithms::write(&self.config.algorithm, &self.view, obj, data)
+            algorithms::write(&mut self.algorithm_ctx, &self.view, obj, data)
         }
     }
 
@@ -446,20 +457,19 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// pipeline mode is still blocking, move to kanal::async_channel
     pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
         // build alg context
-        let actx = algorithms::AlgorithmCallContext {
-                        group_view: &self.view,
-                        start_instant: self.start_instant,
-                        round_time: Duration::from_nanos(self.config.round_time),
-                        read_offset: self.config.read_offset,
-                        logger: self.logger_path.as_deref(),
-                    };
+        // let actx = algorithms::AlgorithmCallContext {
+        //                 start_instant: self.start_instant,
+        //                 round_time: Duration::from_nanos(self.config.round_time),
+        //                 read_offset: self.config.read_offset,
+        //                 logger: self.logger_path.as_deref(),
+        //             };
         
         // read is parametrized to pipeline mode config
         let read_once = || {
             if self.config.pipeline {
                 self.read_threaded(obj)
             } else {
-                algorithms::read(&self.config.algorithm, &actx, obj)
+                algorithms::read(&self.algorithm_ctx, &self.view, obj)
             }
         };
 
@@ -585,6 +595,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     // stop pipeline threads and exit process
     pub fn stop(&self) {
         info!("Stopping repCXL process {}. Goodbye...", self.config.id);
-        self.stop_flag.store(true, Ordering::Relaxed);
+
+        if self.config.pipeline {
+            info!("Stopping pipelined threads...");
+            self.stop_flag.store(true, Ordering::Relaxed);
+        }
+        else { // if pipelined, the write thread prints stats
+            if self.config.algorithm == "monster" || self.config.algorithm == "fmonster" {
+                self.algorithm_ctx.stats.print();
+            }
+        }
     }
 }
