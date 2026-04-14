@@ -3,23 +3,22 @@
 /// all machines.
 use log::{debug, error, info, warn};
 
-use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, Instant};
 
 mod algorithms;
 mod safe_memio;
-mod shmem;
+use safe_memio::ObjectMemoryEntry;
+pub mod shmem;
+mod timer;
 pub mod utils;
+pub mod request;
+use request::{WriteRequest, ReadRequest, ReadReturn};
 use shmem::object_index::ObjectInfo;
 use shmem::{MemoryNode, SharedState};
 pub mod config;
 pub use config::RepCXLConfig;
-
-// Limits
-const MAX_PROCESSES: usize = 128; // Maximum number of processes
-pub const MAX_OBJECTS: usize = 1000; // Maximum number of objects
 
 
 /// The current membership of the group. Stores both the
@@ -73,51 +72,17 @@ impl PartialEq for GroupView {
         self_procs == other_procs && self_nodes == other_nodes
     }
 }
-pub struct WriteRequest<T> {
-    pub(crate) obj_info: ObjectInfo,
-    pub data: T,
-    pub ack_tx: kanal::Sender<bool>,
-}
-
-impl<T> WriteRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, data: T, ack_tx: kanal::Sender<bool>) -> Self {
-        WriteRequest {
-            obj_info,
-            data,
-            ack_tx,
-        }
-    }
-
-    pub(crate) fn to_tuple(self) -> (ObjectInfo, T, kanal::Sender<bool>) {
-        (self.obj_info, self.data, self.ack_tx)
-    }
-}
-
-pub struct ReadRequest<T> {
-    pub(crate) obj_info: ObjectInfo,
-    pub ack_tx: kanal::Sender<ReadReturn<T>>,
-}
-
-impl<T> ReadRequest<T> {
-    pub(crate) fn new(obj_info: ObjectInfo, ack_tx: kanal::Sender<ReadReturn<T>>) -> Self {
-        ReadRequest { obj_info, ack_tx }
-    }
-}
-
-#[derive(Debug)]
-pub enum ReadReturn<T> {
-    ReadSafe(T),
-    ReadDirty(T),
-}
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T: Copy> {
     wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
-    info: ObjectInfo, // could also just store the offset
+    info: ObjectInfo,
 }
 
 impl<T: Copy> RepCXLObject<T> {
+    const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
+
     pub fn new(
         id: usize,
         offset: usize,
@@ -133,19 +98,36 @@ impl<T: Copy> RepCXLObject<T> {
     }
 
     pub fn write(&self, data: T) -> Result<(), String> {
+        let client_start = Instant::now();
         let (ack_tx, ack_rx) = kanal::unbounded();
         let req = WriteRequest::new(self.info, data, ack_tx);
+        let trace_id = req.trace_id;
 
         self.wreq_queue_tx
             .send(req)
             .map_err(|e| format!("Failed to send to object queue: {}", e))?;
+        let send_to_worker = client_start.elapsed();
+        let ack_wait_start = Instant::now();
+
         // std::thread::sleep(Duration::from_millis(10));
         // wait for ack
-        match ack_rx.recv() {
+        let result = match ack_rx.recv() {
             Ok(true) => Ok(()),
             Ok(false) => Err("Failed write operation".into()),
             Err(e) => Err(format!("Failed to receive ack: {}", e)),
+        };
+
+        if trace_id % Self::WRITE_TRACE_SAMPLE_RATE == 0 {
+            debug!(
+                "[WRITE_TRACE][client] id={} send_to_worker={}ns ack_wait={}ns total={}ns",
+                trace_id,
+                send_to_worker.as_nanos(),
+                ack_wait_start.elapsed().as_nanos(),
+                client_start.elapsed().as_nanos(),
+            );
         }
+
+        result
     }
 
     pub fn read(&self) -> Result<ReadReturn<T>, String> {
@@ -164,74 +146,7 @@ impl<T: Copy> RepCXLObject<T> {
     }
 }
 
-/// RepCXL write request unique identifier. Stored next to every object
-/// Comparison checks for largest round number and smallest process ID if
-/// round numbers are equal.
-#[derive(Debug, Clone, Copy)]
-struct Wid {
-    round_num: u64,
-    process_id: usize,
-}
 
-impl PartialEq for Wid {
-    fn eq(&self, other: &Self) -> bool {
-        self.round_num == other.round_num && self.process_id == other.process_id
-    }
-}
-impl Eq for Wid {}
-
-impl PartialOrd for Wid {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Wid {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.round_num.cmp(&other.round_num) {
-            std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
-            std::cmp::Ordering::Less => std::cmp::Ordering::Less,
-            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id),
-        }
-    }
-}
-
-impl Hash for Wid {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.round_num.hash(state);
-        self.process_id.hash(state);
-    }
-}
-
-impl Wid {
-    pub fn new(round_num: u64, process_id: usize) -> Self {
-        Wid {
-            round_num,
-            process_id,
-        }
-    }
-}
-
-/// ObjectMemoryEntry. Stores the current write ID and the value of the object
-/// in memory.
-#[derive(Debug, Clone, Copy)]
-struct ObjectMemoryEntry<T> {
-    wid: Wid,
-    value: T,
-}
-
-impl<T: Copy> ObjectMemoryEntry<T> {
-    pub fn new(wid: Wid, value: T) -> Self {
-        ObjectMemoryEntry { wid, value }
-    }
-
-    pub fn new_nowid(value: T) -> Self {
-        ObjectMemoryEntry {
-            wid: Wid::new(0, 0),
-            value,
-        }
-    }
-}
 
 /// Main RepCXL structure in local memory/cache for each process
 /// current version only supports objects of type T
@@ -244,7 +159,7 @@ pub struct RepCXL<T> {
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     rreq_queue_rx: Option<kanal::Receiver<ReadRequest<T>>>,
     stop_flag: Arc<AtomicBool>,
-    logger: Option<utils::ms_logger::MonsterStateLogger>,
+    algorithm_ctx: algorithms::AlgorithmCallContext,
 }
 
 impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
@@ -267,15 +182,18 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             view.memory_nodes.push(node);
         }
 
-        // init shared state
-        // let state = SharedState::new(config.mem_size, config.chunk_size);
-        // for node in &view.memory_nodes {
-        //     node.write_state(state);
-        // }
-
         // init read and write request queues
         let (wtx, wrx) = kanal::unbounded();
         let (rtx, rrx) = kanal::unbounded();
+
+        let acfg = algorithms::AlgorithmCallContext {
+            algorithm: config.algorithm.clone(),
+            start_instant: Instant::now(), // will be updated at sync_start
+            round_time: Duration::from_nanos(config.round_time),
+            read_offset: config.read_offset,
+            logger: None, // will be set if file logging is enabled
+            stats: algorithms::monster::MonsterStats::new(),
+        };
 
         RepCXL {
             config,
@@ -286,58 +204,8 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             rreq_queue_tx: rtx,
             rreq_queue_rx: Some(rrx),
             stop_flag: Arc::new(AtomicBool::new(false)),
-            logger: None,
+            algorithm_ctx: acfg,
         }
-    }
-
-    pub fn tmp_read(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        match safe_memio::mem_readall(obj.info.offset, &self.view.memory_nodes) {
-        Ok(states) => {
-                // check if all states are consistent (have the same wid (i.e. value))
-                // and get the latest wid with one pass
-                // println!("{:?}", states);
-                let (consistent, latest) = states.iter().skip(1).fold(
-                    (true, &states[0]),
-                    |(cons, best), s| (cons && s.wid == states[0].wid, if s.wid > best.wid { s } else { best }),
-                );
-                // return based on consistency
-                if consistent {
-                    return Ok(ReadReturn::ReadSafe(latest.value));
-                } else {
-                    return Ok(ReadReturn::ReadDirty(latest.value));
-                };
-            },
-            Err(safe_memio::MemoryError(memory_node_id)) => {
-                Err(format!("Memory node {} failed during read", memory_node_id))
-            }
-        }
-
-    }
-
-    /// Use the config-specified read algorithm to read an object. 
-    /// Retries the operation up to `config.read_retries` times if it returns a
-    /// dirty read.
-    pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        let mut res = algorithms::get_read_algorithm_client(
-            &self.config.algorithm,
-            self.view.clone(), 
-            obj);
-
-        for _ in 0..self.config.read_retries {
-            match res {
-                Ok(ReadReturn::ReadDirty(_)) => {
-                 res = algorithms::get_read_algorithm_client(
-                            &self.config.algorithm,
-                            self.view.clone(), 
-                            obj);   
-                }
-                _ => break,
-                }
-            
-        }
-
-        res
-        
     }
 
     /// Enable state logging to a file. Clears any existing log at the path.
@@ -345,7 +213,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn enable_file_log(&mut self, path: &str) {
         let mut log = utils::ms_logger::MonsterStateLogger::new(path);
         log.clear();
-        self.logger = Some(log);
+        self.algorithm_ctx.logger = Some(path.to_string());
     }
 
     pub fn register_process(&mut self, pid: u32) {
@@ -411,8 +279,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// # Arguments
     /// * `id` - Unique identifier for the object.
     pub fn new_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
-        if self.num_of_objects >= MAX_OBJECTS {
+        if self.num_of_objects >= shmem::MAX_OBJECTS {
             warn!("Maximum number of objects reached");
+            return None;
+        }
+
+
+        // TODO: do it more cleanly
+        if id >= shmem::MAX_OBJECTS {
+            warn!("Allowed IDs: 0-{}", shmem::MAX_OBJECTS - 1);
             return None;
         }
 
@@ -487,10 +362,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// Attempt to get an object reference by its ID first in the local cache
     /// and then in the shared state.
     pub fn get_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
-        // info!(
-        //     "Object with id {} not found in cache, looking in shared state",
-        //     id
-        // );
 
         let state = self.read_state_from_any().unwrap();
 
@@ -509,35 +380,161 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         None
     }
 
-    /// Start the repCXL protocol threads without synchronization. Use `sync_start` 
-    /// for sync protocols.
+
+    fn write_threaded(&self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
+        // let client_start = Instant::now();
+        let (ack_tx, ack_rx) = kanal::unbounded();
+        let req = WriteRequest::new(obj.info, data, ack_tx);
+        // let trace_id = req.trace_id;
+
+        self.wreq_queue_tx
+            .send(req)
+            .map_err(|e| format!("Failed to send to object queue: {}", e))?;
+        // let send_to_worker = client_start.elapsed();
+        // let ack_wait_start = Instant::now();
+
+        // std::thread::sleep(Duration::from_millis(10));
+        // wait for ack
+        let result = match ack_rx.recv() {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("Failed write operation".into()),
+            Err(e) => Err(format!("Failed to receive ack: {}", e)),
+        };
+
+        // if trace_id % Self::WRITE_TRACE_SAMPLE_RATE == 0 {
+        //     debug!(
+        //         "[WRITE_TRACE][client] id={} send_to_worker={}ns ack_wait={}ns total={}ns",
+        //         trace_id,
+        //         send_to_worker.as_nanos(),
+        //         ack_wait_start.elapsed().as_nanos(),
+        //         client_start.elapsed().as_nanos(),
+        //     );
+        // }
+
+        result
+    }
+
+    fn read_threaded(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
+        let (ack_tx, ack_rx) = kanal::unbounded();
+        let req = ReadRequest::new(obj.info, ack_tx);
+        self.rreq_queue_tx
+            .send(req)
+            .map_err(|e| format!("Failed to send to object queue: {}", e))
+            .unwrap();
+
+        // wait for ack
+        match ack_rx.recv() {
+            Ok(return_val) => Ok(return_val),
+            Err(e) => Err(format!("Failed to receive read ack: {}", e)),
+        }
+    }
+
+    /// Write to an object. Behavior depends on configuration parameters: 
+    ///
+    /// - algorithm: protocol used for the read operation
+    /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
+    /// pipeline mode is still blocking, move to kanal::async_channel or similar
+    pub fn write_object(&mut self, obj: &RepCXLObject<T>, data: T) -> Result<(), String> {
+        
+        if self.config.pipeline {
+            self.write_threaded(obj, data)
+        }
+        else {
+            algorithms::write(&mut self.algorithm_ctx, &self.view, obj, data)
+        }
+    }
+
+    /// Read from an object. Behavior depends on configuration parameters: 
+    ///
+    /// - algorithm: protocol used for the read operation
+    /// - read_retries: number of times to retry the operation if it returns a
+    ///   dirty read
+    /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
+    /// pipeline mode is still blocking, move to kanal::async_channel
+    pub fn read_object(&self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
+        // build alg context
+        // let actx = algorithms::AlgorithmCallContext {
+        //                 start_instant: self.start_instant,
+        //                 round_time: Duration::from_nanos(self.config.round_time),
+        //                 read_offset: self.config.read_offset,
+        //                 logger: self.logger_path.as_deref(),
+        //             };
+        
+        // read is parametrized to pipeline mode config
+        let read_once = || {
+            if self.config.pipeline {
+                self.read_threaded(obj)
+            } else {
+                algorithms::read(&self.algorithm_ctx, &self.view, obj)
+            }
+        };
+
+        let mut res = read_once();
+        // keep retrying if we get read-dirty
+        for _ in 0..self.config.read_retries {
+            match res {
+                Ok(ReadReturn::ReadDirty(_)) => {
+                    res = read_once();
+                    continue
+                },
+                _ => break,
+            }
+        }
+
+        res
+    }
+
+
+
+    /// Start the repCXL protocol threads without initial synchronization (for async protocols)
     pub fn start(&mut self) {
         let algorithm = self.config.algorithm.clone();
-        let rt = Duration::from_nanos(self.config.round_time);
-        let start_time = std::time::SystemTime::now();
-        let v = self.view.clone();
+
+        if self.config.pipeline {
+            info!("Starting pipelined write thread for algorithm {}", algorithm);
+        } else {
+            info!("Starting non-pipelined write thread for algorithm {}", algorithm);
+        }
 
 
-        // WRITE thread
-        {
-            core_affinity::set_for_current(core_affinity::CoreId { id: 1 });
-            let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
-            let logger = self.logger.take();
-            let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
+        // pipeline mode uses threads and requests queues
+        if self.config.pipeline {
+            // for both read and write threads move the rx queue to the thread
+            // and keep the tx queue in main state
+
+            // build thread context
+            let wactx = algorithms::AlgorithmThreadContext {
+                group_view: self.view.clone(),
+                start_instant: self.algorithm_ctx.start_instant,
+                round_time: Duration::from_nanos(self.config.round_time),
+                read_offset: self.config.read_offset,
+                stop_flag: self.stop_flag.clone(),
+                logger: self.algorithm_ctx.logger.clone(),
+            };
+
+            let ractx = wactx.clone();
+
+            // WRITE thread
+            let wreq_queue = self.wreq_queue_rx.take().expect("Receiver already taken");
+
+            let core_affinity = self.config.core_affinity;
             std::thread::spawn(move || {
-                algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
+                if let Some(core) = core_affinity {
+                        core_affinity::set_for_current(core_affinity::CoreId { id: core });
+                }
+                algorithms::write_thread(&algorithm, wactx, wreq_queue);
+            });
+
+            // READ thread
+            let algo = self.config.algorithm.clone();
+            let rreq_queue = self.rreq_queue_rx.take().expect("Receiver already taken");
+
+            std::thread::spawn(move || {
+                // @TODO: pin thread for read?
+                algorithms::read_thread(&algo, ractx, rreq_queue);
             });
         }
 
-        // READ thread
-        // {
-        //     // no thread pin for read as it is unused rn
-        //     let stop = self.stop_flag.clone();
-        //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
-        //     std::thread::spawn(move || {
-        //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
-        //     });
-        // }
 
     }
 
@@ -547,9 +544,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// ensure consistency.
     pub fn sync_start(&mut self) {
         if let Some(_coord) = self.view.get_coordinator() {
-            let algorithm = self.config.algorithm.clone();
-            let rt = Duration::from_nanos(self.config.round_time);
-
             let mstate = self.get_state_from_master().unwrap();
             let sblock = mstate.get_starting_block();
             let start_time;
@@ -562,7 +556,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
                     // check if all processes are ready
                     if sblock.all_ready(self.view.processes.clone()) {
-                        start_time = std::time::SystemTime::now() + Duration::from_nanos(self.config.startup_delay);
+                        start_time = SystemTime::now() + Duration::from_nanos(self.config.startup_delay);
                         sblock.start_at(start_time);
                         info!("Rounds starting at {:?}", start_time);
 
@@ -580,46 +574,32 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 debug!("Process {} waiting for start...", self.config.id);
             }
 
-            let v = self.view.clone();
-            // let rt = self.round_time;
+            let start_instant = timer::system_time_to_instant(start_time);
+            self.algorithm_ctx.start_instant = start_instant;
 
-            // for both read and write threads move the rx queue to the thread
-            // and keep the tx queue in state to assign to new objects
+            timer::wait_start_time(start_instant, timer::ROUND_SLEEP_RATIO);
 
-            // WRITE thread
-            {
-                let (algorithm, v, stop) = (algorithm.clone(), v.clone(), self.stop_flag.clone());
-                let logger = self.logger.take();
-                let rx = self.wreq_queue_rx.take().expect("Receiver already taken");
-                let core_affinity = self.config.core_affinity;
-                std::thread::spawn(move || {
-                    if let Some(core) = core_affinity {
-                         core_affinity::set_for_current(core_affinity::CoreId { id: core });
-                    }
-                    algorithms::get_write_algorithm(algorithm)(v, start_time, rt, rx, stop, logger);
-                });
-            }
+            self.start();
 
-            // READ thread
-            // {
-            //     let stop = self.stop_flag.clone();
-            //     let rx = self.rreq_queue_rx.take().expect("Receiver already taken");
-            //     std::thread::spawn(move || {
-            //         // no thread pin for read as it is unused rn
-            //         algorithms::get_read_algorithm(algorithm)(v, start_time, rt, rx, stop);
-            //     });
-            // }
-
-            // block until after start time
-            // std::thread::sleep(Duration::from_secs(2));
         } else {
             error!("FATAL: No coordinator found in group");
             return;
         }
     }
 
+
+    // stop pipeline threads and exit process
     pub fn stop(&self) {
         info!("Stopping repCXL process {}. Goodbye...", self.config.id);
-        self.stop_flag.store(true, Ordering::Relaxed);
+
+        if self.config.pipeline {
+            info!("Stopping pipelined threads...");
+            self.stop_flag.store(true, Ordering::Relaxed);
+        }
+        else { // if pipelined, the write thread prints stats
+            if self.config.algorithm == "monster" || self.config.algorithm == "fmonster" {
+                self.algorithm_ctx.stats.print();
+            }
+        }
     }
 }

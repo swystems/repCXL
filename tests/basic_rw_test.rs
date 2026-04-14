@@ -1,5 +1,5 @@
 use std::time::Duration;
-use rep_cxl::ReadReturn;
+use rep_cxl::request::ReadReturn;
 
 mod test_utils;
 use test_utils::*;
@@ -30,31 +30,33 @@ fn test_rw() {
     repcxl1.config.round_time = ROUND_TIME.as_nanos() as u64;
     
     // coordinator creates object
-    repcxl0.new_object(5);
+    let obj5 = repcxl0.new_object(5).unwrap();
     // other replica gets it
-    let obj5 = repcxl1.get_object(5).expect("failed to get obj with id 5");
+    let obj5replica = repcxl1.get_object(5).expect("failed to get obj with id 5");
     
     // both start
     std::thread::spawn(move || {
-        repcxl0.sync_start();
+        repcxl0.start();
+        // Perform write
+        let result = obj5.write(val);
+        assert!(result.is_ok(), "Write should succeed");
     });
-    std::thread::spawn(move || {
-        repcxl1.sync_start();
-    });
+    std::thread::sleep(Duration::from_millis(100)); // wait for write to propagate
     
+    repcxl1.start();
     
-    // Perform write
-    let result = obj5.write(val);
-    assert!(result.is_ok(), "Write should succeed");
-
     // verify the value was written correctly
-    let read_val = obj5.read().expect("Read should succeed");
+    let read_val = repcxl1.read_object(&obj5replica).expect("Read should succeed");
     // assert!(matches!(read_val, ReadReturn::ReadDirty(_)), "Read should return ReadDirty variant");
     if let ReadReturn::ReadDirty(v) = read_val {
         assert_eq!(v, val, "Read value should match written value");
         assert_ne!(v, 0, "Read value should not be default value");
     }
 
+    if let ReadReturn::ReadSafe(v) = read_val {
+        assert_eq!(v, val, "Read value should match written value");
+        assert_ne!(v, 0, "Read value should not be default value");
+    }
     cleanup_tmpfs_file(node_path);
 
     // std::thread::sleep(Duration::from_secs(10));

@@ -12,6 +12,7 @@ set -e
 VM_ID=$1
 NUMA_NODE_CXL=$2
 MEMORY_NODES=$3
+ISOL_CORES=8-11
 
 if [ -z "$VM_ID" ] || [ -z "$NUMA_NODE_CXL" ] || [ -z "$MEMORY_NODES" ]; then
   echo "Usage: $0 <vm_id> <numa_node_cxl> <memory_nodes>"
@@ -21,7 +22,7 @@ fi
 QEMU_ARGS=(
     -name "repcxl-vm${VM_ID}"
     -machine q35
-    -cpu host,+invtsc
+    -cpu host
     -m 8G,slots=2,maxmem=16G
     -smp 4
     --enable-kvm
@@ -51,4 +52,4 @@ if [[ "${FIRST_BOOT:-0}" -eq 1 ]]; then
 fi
 
 echo "Starting VM ${VM_ID}..."
-qemu-system-x86_64 "${QEMU_ARGS[@]}"
+taskset -c $ISOL_CORES qemu-system-x86_64 "${QEMU_ARGS[@]}"

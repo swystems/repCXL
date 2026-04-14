@@ -3,39 +3,43 @@
 
 # Memory nodes. In the VM setup, memory regions of the CXL node from the host 
 # are exposed as PCI devices with inter-vm shared memory 
-mem_nodes = ["/dev/shm/repCXLnode0", "/dev/shm/repCXLnode1"]
+mem_nodes = [
+"/dev/dax0.0",
+"/dev/dax0.1",
+"/dev/dax0.2",
+] 
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
 chunk_size = 64
 
 # (required) unique identifier for the repCXL instance. Can be passed with -i
-id = 0 
+id = {{ repcxl_id }} 
 
 # List of process IDs in the cluster. Can be specified as:
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = [0, 1, 2, 3]
+processes = {{ process_list }}
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
 
 # (ns) Duration of the synchronous round (in nanoseconds)
-round_time = 1_000 
+round_time = {{ round_time }} 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "monster"
+algorithm = "{{ algorithm }}"
 
 # Enable pipelined write path (true/false)
-pipeline = false
+pipeline = {{ (pipeline | default(false)) | string | lower }}
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 7 
+read_retries = {{ read_retries }}
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
-# core_affinity = 1 
+# core_affinity = 2 
 
-# Read offset factor for the monster algorithm: every read operation waits until
-# x% of the round before reading. No wait if not specified 
-read_offset = 0.5
+{% if read_offset is defined %}
+read_offset = {{ read_offset }}
+{% endif %}

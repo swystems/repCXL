@@ -4,6 +4,7 @@
 // the same set of parameters can be supplied via file instead of flags.
 
 use std::fs;
+use crate::shmem;
 use serde::{Deserialize, Deserializer};
 
 // default values for config parameters
@@ -13,8 +14,10 @@ const DEFAULT_STARTUP_DELAY: u64 = 1000000000; // 1s
 const DEFAULT_ROUND_TIME_NS: u64 = 100000; //1ms
 const DEFAULT_PROCESSES: &[u32] = &[0]; // default to single process with ID 0
 const DEFAULT_ALGORITHM: &str = "monster";
+const DEFAULT_PIPELINE: bool = false;
 const DEFAULT_READ_RETRIES: usize = 0;
 const DEFAULT_CORE_AFFINITY: Option<usize> = None;
+const DEFAULT_READ_OFFSET: Option<f64> = None;
 
 
 
@@ -85,7 +88,9 @@ pub struct RepCXLConfig {
     #[serde(deserialize_with = "parse_processes")]
     pub processes: Vec<u32>,
     pub algorithm: String,
+    pub pipeline: bool,
     pub read_retries: usize,
+    pub read_offset: Option<f64>,
     pub core_affinity: Option<usize>,
 }
 
@@ -100,7 +105,9 @@ impl Default for RepCXLConfig {
             id: -1, // -1 indicates no id provided in config file
             processes: DEFAULT_PROCESSES.to_vec(), // default to single process with ID 0
             algorithm: DEFAULT_ALGORITHM.to_string(),
+            pipeline: DEFAULT_PIPELINE,
             read_retries: DEFAULT_READ_RETRIES,
+            read_offset: DEFAULT_READ_OFFSET,
             core_affinity: DEFAULT_CORE_AFFINITY,
         }
     }
@@ -134,8 +141,8 @@ impl RepCXLConfig {
         }
 
         // must have less than MAX_PROCESSES
-        if self.processes.len() > crate::MAX_PROCESSES as usize {
-            return Err(format!("{} Maximum number of processes: {}", err_prefix, crate::MAX_PROCESSES));
+        if self.processes.len() > shmem::MAX_PROCESSES as usize {
+            return Err(format!("{} Maximum number of processes: {}", err_prefix, shmem::MAX_PROCESSES));
         }
 
         // must specify at least one node

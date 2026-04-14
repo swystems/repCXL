@@ -115,7 +115,7 @@ fn test_object_limit() {
     let mut rcxl = single_rcxl(0, vec![node_path]);
     rcxl.init_state();
 
-    let max_objs = rep_cxl::MAX_OBJECTS;
+    let max_objs = rep_cxl::shmem::MAX_OBJECTS;
 
     // Try to create more than MAX_OBJECTS (128)
     for i in 0..max_objs {

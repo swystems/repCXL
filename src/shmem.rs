@@ -1,6 +1,9 @@
 use libc::{mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
 use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
+
+
 
 // currently not used, requires the libnuma
 // mod numa_mem_node;
@@ -10,8 +13,10 @@ use object_index::ObjectIndex;
 mod starting_block;
 use starting_block::StartingBlock;
 pub mod wcc;
-use wcc::ObjectWCC;
+use wcc::{ObjectWCC, FastWCC};
 
+pub const MAX_OBJECTS: usize = 1000; // Maximum number of objects
+pub const MAX_PROCESSES: usize = 512; // Maximum number of processes
 const STATE_SIZE: usize = std::mem::size_of::<SharedState>();
 
 #[derive(Debug, Clone, Copy)]
@@ -19,6 +24,7 @@ pub(crate) struct SharedState {
     pub(crate) object_index: ObjectIndex,
     starting_block: StartingBlock,
     owcc: ObjectWCC,
+    fwcc: FastWCC,
 }
 
 impl SharedState {
@@ -27,6 +33,7 @@ impl SharedState {
             object_index: ObjectIndex::new(total_size, chunk_size),
             starting_block: StartingBlock::new(),
             owcc: ObjectWCC::new(),
+            fwcc: FastWCC::new(),
         }
     }
 
@@ -36,6 +43,10 @@ impl SharedState {
 
     pub(crate) fn get_owcc(&mut self) -> &mut ObjectWCC {
         &mut self.owcc
+    }
+
+    pub(crate) fn get_fwcc(&mut self) -> &mut FastWCC  {
+        &mut self.fwcc
     }
 }
 
@@ -50,35 +61,47 @@ pub(crate) struct MemoryNode {
 }
 
 impl MemoryNode {
-    // Create a MemoryNode from a file in tmpfs mapped to a CXL node.
+    // Create a MemoryNode from a file in tmpfs mapped to a CXL node or from
+    // a CXL DAX device (e.g., /dev/dax0.0)
     // Processes/VMs on same host will share the memory region, not guaranteed
     // across different hosts
     // assumes all processes/VMs use the same file path
     pub(crate) fn from_file(id: usize, path: &str, size: usize) -> Self {
         if size <= STATE_SIZE {
-            panic!("Size must be greater than SharedState size:\n\tObjectIndex: {}\n\tstarting_block: {}\n\twcc_mo: {}", 
+            panic!("Size must be greater than SharedState size:\n\tObjectIndex: {}\n\tstarting_block: {}\n\towcc: {}\n\tfwcc: {}", 
                 std::mem::size_of::<ObjectIndex>(), 
                 std::mem::size_of::<StartingBlock>(), 
-                std::mem::size_of::<ObjectWCC>()
+                std::mem::size_of::<ObjectWCC>(),
+                std::mem::size_of::<FastWCC>()
             );
         }
 
         let file = OpenOptions::new()
             .read(true)
             .write(true)
+            .custom_flags(libc::O_SYNC) // avoid page cache effects
             .open(path)
             .expect("Failed to open shared memory. Does the file exist?");
+
+        /* DAX mapping requires a 2MiB alignment */
+        let page = 2 * 1024 * 1024;
+        if size < page {
+            panic!("Size must be at least 2 MiB for DAX mapping");
+        }
+
+        let page_aligned_size = (size / page) * page;
 
         let ptr = unsafe {
             mmap(
                 std::ptr::null_mut(),
-                size,
+                page_aligned_size,
                 PROT_READ | PROT_WRITE,
                 MAP_SHARED,
                 file.as_raw_fd(),
                 0,
             )
         };
+
 
         if ptr == libc::MAP_FAILED {
             panic!(

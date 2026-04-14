@@ -9,36 +9,109 @@
 
 use rand::Rng;
 use rand::prelude::IndexedRandom;  // Enables choose() on slices
-use crate::ObjectMemoryEntry;
+use crate::request::Wid;
 use crate::shmem::MemoryNode;
 use log::error;
+use core::arch::x86_64::{_mm_mfence, _mm_sfence};
 
 const FAILURE_PROBABILITY: f32 = 0.0;
+pub const CACHE_LINE_SIZE: usize = 64;
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub(crate) unsafe fn clflushopt(addr: *const u8) {
+    core::arch::asm!("clflushopt [{}]", in(reg) addr, options(nostack, preserves_flags));
+}
+
+/// Flush cache lines covering `size` bytes starting at `addr` using pipelined
+/// clflushopt. Does NOT issue a fence — caller must follow with the
+/// appropriate fence (sfence for write path, mfence for read path).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub(crate) unsafe fn clflushopt_range(addr: *const u8, size: usize) {
+    let end = addr.add(size);
+    let mut ptr = addr;
+    while ptr < end {
+        clflushopt(ptr);
+        ptr = ptr.add(CACHE_LINE_SIZE);
+    }
+}
+
+/// Flush + sfence: ensures writes are globally visible before subsequent stores.
+/// Use after write_volatile.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
+    clflushopt_range(addr, size);
+    _mm_sfence();
+}
+
+/// Flush + mfence: ensures cache lines are evicted before subsequent loads.
+/// Use before read_volatile to guarantee reads come from memory.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+pub(crate) unsafe fn cache_flush_read(addr: *const u8, size: usize) {
+    clflushopt_range(addr, size);
+    _mm_mfence();
+}
+
+pub(crate) fn mem_write_flush<T: Copy>(addr: *mut T, data: T) {
+    unsafe {
+        std::ptr::write_volatile(addr, data);
+        cache_flush_write(addr as *const u8, std::mem::size_of::<T>());
+    }
+}
 
 #[derive(Debug)]
 pub struct MemoryError(pub usize);
 
-pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
-    // let mut rng = rand::rng();
-    // let roll: f32 = rng.random(); // random float between 0.0 and 1.0
-    // if roll < FAILURE_PROBABILITY {
-    //     return Err("Simulated write failure");
-    // }
 
-    unsafe {
-        std::ptr::write(addr, data);
+/// ObjectMemoryEntry. Stores the current write ID and the value of the object
+/// in memory.
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectMemoryEntry<T> {
+    pub wid: Wid,
+    pub value: T,
+}
+
+impl<T: Copy> ObjectMemoryEntry<T> {
+    pub fn new(wid: Wid, value: T) -> Self {
+        ObjectMemoryEntry { wid, value }
     }
+
+    pub fn new_nowid(value: T) -> Self {
+        ObjectMemoryEntry {
+            wid: Wid::new(0, 0),
+            value,
+        }
+    }
+}
+
+pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
+    if FAILURE_PROBABILITY > 0.0 {
+        let mut rng = rand::rng();
+        let roll: f32 = rng.random(); // random float between 0.0 and 1.0
+        if roll < FAILURE_PROBABILITY {
+            return Err("Simulated write failure");
+        }
+    }
+
+    // mechanism to handle segfault here, signal catch plus backup process
+    unsafe { std::ptr::write_volatile(addr, data); }
     Ok(())
 }
 
 pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemoryEntry<T>, &'static str> {
-    let mut rng = rand::rng();
-    let roll: f32 = rng.random(); // random float between 0.0 and 1.0
-    if roll < FAILURE_PROBABILITY {
-        return Err("Simulated read failure");
+    if FAILURE_PROBABILITY > 0.0 {
+        let mut rng = rand::rng();
+        let roll: f32 = rng.random(); // random float between 0.0 and 1.0
+        if roll < FAILURE_PROBABILITY {
+            return Err("Simulated read failure");
+        }
     }
+    // mechanism to handle segfault here, signal catch plus backup process
 
-    unsafe { Ok(std::ptr::read(addr)) }
+    Ok(unsafe { std::ptr::read_volatile(addr) })
 }
 
 /// Read the value from all memory nodes for the given object
@@ -60,6 +133,7 @@ pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
 }
 
 /// Write the an ObjectMemoryEntry to all memory nodes at its given memory offset 
+/// Flush&fence to ensure visibility
 pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes: &Vec<MemoryNode>) -> Result<(), MemoryError> {
 
     // write data to all memory nodes
@@ -72,7 +146,12 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
             );
             return Err(MemoryError(node.id));
         }
+        // flush
+        unsafe { clflushopt_range(addr  as *const u8, size_of::<ObjectMemoryEntry<T>>()); }
     }
+
+    // fence once only after all writes to all mem nodes are flushed
+    unsafe { _mm_mfence(); }
 
     Ok(())
 }
@@ -80,7 +159,7 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
 
 /// Read the value from all memory nodes for the given object
 pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
-    let mut states = Vec::new();
+    let mut states = Vec::with_capacity(mem_nodes.len());
     for node in mem_nodes {
         let addr = node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
         match safe_read(addr) {
@@ -101,14 +180,26 @@ pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resul
 /// Read the value from the first and last memory nodes only, exploiting the
 /// fact that memory nodes are written to always in the same order. Used for
 /// scalability improvements
-pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
-    let mut states = Vec::new();
+pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
     
-    // read the first node
     let first_node = &mem_nodes[0];
-    let addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    match safe_read(addr) {
-        Ok(data) => states.push(data),
+    let last_node = &mem_nodes[mem_nodes.len() - 1];
+
+    // flush nodes
+    for node in [first_node, last_node] {
+        let addr = node.addr_at(offset);
+        unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
+    }
+    // wait for flush to complete before reading
+    unsafe { _mm_mfence(); }
+
+    let start = std::time::Instant::now(); // debug read times
+
+    // now read both from memory    
+    let mut addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    let debug_step1 = start.elapsed().as_nanos(); // debug read times
+    let first = match safe_read(addr) {
+        Ok(data) => data,
         Err(e) => {
             error!(
                 "Safe read failed. Node {}, offset {}: {}",
@@ -116,13 +207,14 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
             );
             return Err(MemoryError(first_node.id));
         }
-    }
+    };
+
+    let debug_step2 = start.elapsed().as_nanos(); // debug read times
     
     // read the last node
-    let last_node = &mem_nodes[mem_nodes.len() - 1];
-    let addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    match safe_read(addr) {
-        Ok(data) => states.push(data),
+    addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    let last = match safe_read(addr) {
+        Ok(data) => data,
         Err(e) => {
             error!(
                 "Safe read failed. Node {}, offset {}: {}",
@@ -130,7 +222,16 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
             );
             return Err(MemoryError(last_node.id));
         }
-    }
-    Ok(states)
+    };
+    let debug_step3 = start.elapsed().as_nanos(); // debug read times
+    
+    log::debug!("write_size: {}B, step 1: {} step2: {}, step3: {}", 
+        size_of::<ObjectMemoryEntry<T>>(), 
+        debug_step1, 
+        debug_step2-debug_step1, 
+        debug_step3 - debug_step2);
+
+
+    Ok([first, last])
 }
 

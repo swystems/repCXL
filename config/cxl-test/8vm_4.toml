@@ -1,0 +1,16 @@
+
+mem_nodes = [
+"/sys/bus/pci/devices/0000:00:03.0/resource2", 
+"/sys/bus/pci/devices/0000:00:04.0/resource2",
+"/sys/bus/pci/devices/0000:00:05.0/resource2"
+] 
+mem_size = 1_000_000_000 
+chunk_size = 64
+# id = 0 # provided as arg
+processes = [0, 1, 2, 3, 5, 6, 7, 8]
+startup_delay = 1000000000
+round_time = 4_000 
+algorithm = "monster"
+read_retries = 0
+# core_affinity = 1 
+

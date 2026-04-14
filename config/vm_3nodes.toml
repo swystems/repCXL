@@ -31,9 +31,15 @@ round_time = 1_000
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "monster"
 
+# Enable pipelined write path (true/false)
+pipeline = false
+
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = 7 
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 1 
 
+# Read offset factor for the monster algorithm: every read operation waits until
+# x% of the round before reading. No wait if not specified 
+read_offset = 0.5

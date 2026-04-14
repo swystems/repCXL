@@ -3,12 +3,12 @@
 # to access memory nodes
 set -e
 
-VM_ID=$1
+REPCXL_ID=$1
 WORKLOAD=$2
 CONFIG=$3
 
-if [ -z "$VM_ID" ]; then
-    echo "Usage: $0 <vm_id>"
+if [ -z "$REPCXL_ID" ]; then
+    echo "Usage: $0 <repcxl_id> <workload> <config>"
     exit 1
 fi
 
@@ -22,4 +22,4 @@ target/release/ycsb_client \
     ycsb/traces/${WORKLOAD}_load.dat \
     ycsb/traces/${WORKLOAD}_run.dat \
     --config ${CONFIG} \
-    --id ${VM_ID}
+    --id ${REPCXL_ID}

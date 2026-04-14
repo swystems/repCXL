@@ -1,7 +1,16 @@
 ---
-- name: Deploy repCXL from GitHub
+- name: Deploy local repCXL repo
   hosts: vms
   tasks:
+
+    - name: generate repCXL config file from template locally
+      delegate_to: localhost
+      run_once: true
+      template:
+        src: config.template.j2
+        dest: "{{ local_repo }}/{{ repcxl_config }}"
+      when: repcxl_config == "config/ansible.toml"
+
     - name: synchronize the content of this repo to remote hosts
       synchronize:
         src: "{{ local_repo }}"
@@ -12,3 +21,11 @@
           - "--exclude=jupyter/"
           - "--exclude=test/"
           - "--exclude=ansible/"
+
+    - name: build repCXL client
+      shell: |
+        source $HOME/.cargo/env
+        cargo build --release
+      args: 
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"

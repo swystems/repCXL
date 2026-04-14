@@ -85,6 +85,13 @@ impl ArgParser {
                     .value_parser(value_parser!(String)),
             )
             .arg(
+                Arg::new("pipeline")
+                    .short('P')
+                    .long("pipeline")
+                    .help("Enable or disable pipelined write path")
+                    .value_parser(value_parser!(bool)),
+            )
+            .arg(
                 Arg::new("read_retries")
                     .short('R')
                     .long("read-retries")
@@ -110,10 +117,10 @@ impl ArgParser {
 
         let mut matches = cmd.get_matches();
 
-        // Parse individual CLI arguments
+        // Parse configuration file first
         if let Some(ref path) = matches.remove_one::<String>("config") {
             self.config = RepCXLConfig::from_file(path).unwrap_or_else(|e| {
-                error!("{}",e);
+                error!("{}", e);
                 println!("{}", usage_string);
                 std::process::exit(1);
             });
@@ -130,6 +137,9 @@ impl ArgParser {
         }
         if let Some(algorithm) = matches.remove_one::<String>("algorithm") {
             self.config.algorithm = algorithm;
+        }
+        if let Some(pipeline) = matches.remove_one::<bool>("pipeline") {
+            self.config.pipeline = pipeline;
         }
         if let Some(processes) = matches.remove_one::<u32>("processes") {
             self.config.processes = Vec::from_iter(0..processes);

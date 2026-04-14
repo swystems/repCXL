@@ -2,13 +2,80 @@
 
 A collection of useful howtos, concepts, explainations. 
 
+## Run tests
+
+Unit tests: test internal RepCXL functions
+
+    cargo test
+
+Memory test: access latency of a memory-backed file. Examples:
+
+```sh
+cargo build --release
+target/debug/mem_test --help # usage and help
+# mem test on CXL dax device with 100k iterations and object size of 128B
+target/debug/mem_test /dev/dax0.0 -o 128 -n 100000
+```
+
+Shared memory test: verify different RepCXL intances correctly communicate through shared memory. 
+
+```sh
+# coordinator first (sets up the memory)
+target/release/shmem_obj_test coordinator -c config/ansible.toml
+# then replica
+target/release/shmem_obj_test replica -c config/ansible.toml
+sudo target/release/shmem_obj_test replica -c config/ansible.toml
+DEBUG [rep_cxl::safe_memio] write_size: 32B, step 1: 310 step2: 560, step3: 320
+Replica successfully read: Hello, RepCXL!
+INFO  [rep_cxl] Stopping repCXL process 0. Goodbye...
+```
+
+## Create CXL DAX devices
+
+CXL memory can be attached either as (1) a NUMA node or as (2) an mmappable DAX 
+character device. We can use (1) for memory tests like `mlc` when we want the 
+kernel to manage the memory for us. (2) is more convenient when we want to manage
+the memory ourselves, e.g., for repCXL shared memory use case. 
+
+Create multiple multiple DAX devices (to simulate memory nodes) as follows. 
+Load necessary modules:
+
+```sh
+echo offline > /sys/devices/system/memory/auto_online_blocks
+
+modprobe cxl_pci
+modprobe cxl_mem
+modprobe cxl_acpi
+modprobe cxl_pmem
+modprobe cxl_port
+modprobe dax_hmem
+modprobe device_dax
+```
+
+List existing dax devices:
+
+    daxctl list -u
+
+List available CXL region:
+
+    daxctl list -Ru
+
+Create a new device with 4G memory
+
+    daxctl create-device -s 4G
+
+If an existing device fills all the available memory already, resize
+
+    daxctl reconfigure-device -s <new_size> -u /dev/dax<number>
+
+
 ## QEMU VM management
 > See `ansible/` folder for automated workflows. Info for manual setup below
 
 ### create Ubuntu 24.04 VM using CXL memory
 
 Create a disk (at least 20G, will leave 7G available to use with Ubuntu 24.04):
-
+rcxl.write_object
 ```sh
 qemu-img create -f qcow2 cxlvm1_disk.qcow2 20G
 ```

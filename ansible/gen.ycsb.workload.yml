@@ -14,12 +14,19 @@
         src: "{{ local_repo }}/ycsb"
         dest: "{{ remote_dir }}/"
     
+    - name: get absolute path of remote work directory
+      shell: realpath {{ remote_dir }}
+      register: remote_abs
+
+    - name: get ycsb files path (workloads, traces)
+      set_fact:
+        yfp: "{{ remote_abs.stdout }}/ycsb"
+    
     - name: generate workload file for YCSB client
       shell: |
-        bin/ycsb load basic -P {{ remote_abs }}/ycsb/workloads/{{ ycsb_workload }} > {{ remote_abs }}/ycsb/traces/{{ ycsb_workload }}_load.dat
-        bin/ycsb run basic -P {{ remote_abs }}/ycsb/workloads/{{ ycsb_workload }} > {{ remote_abs }}/ycsb/traces/{{ ycsb_workload }}_run.dat
-      vars:
-        remote_abs: "/home/{{ansible_user}}/{{ remote_dir }}"
+        bin/ycsb load basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_load.dat
+        bin/ycsb run basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_run.dat
+
       args:
         executable: /bin/bash
         chdir: "{{ ycsb_remote_source_dir }}"
