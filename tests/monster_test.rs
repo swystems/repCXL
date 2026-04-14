@@ -12,37 +12,6 @@ fn wait_for_rounds(rounds: u32) {
     std::thread::sleep(Duration::from_nanos(TEST_ROUND_TIME) * rounds);
 }
 
-fn start_two_nodes_and_create_object(
-        node_paths: Vec<&'static str>,
-) -> (rep_cxl::RepCXLObject<u64>, rep_cxl::RepCXLObject<u64>) {
-    let mut repcxls = multi_rcxl(2, node_paths).into_iter();
-    // get owned repCXL instances to move to threads later
-    let mut repcxl0 = repcxls.next().unwrap();
-    let mut repcxl1 = repcxls.next().unwrap();
-
-    // register processes
-    repcxl0.register_process(1);
-    repcxl1.register_process(0);
-
-    // coordinator creates object
-    let obj5_coordinator = repcxl0.new_object(5).expect("failed to get obj with id 5");
-    // other replica gets it
-    let obj5_replica = repcxl1.get_object(5).expect("failed to get obj with id 5");
-
-    // both start
-    let handle0 = std::thread::spawn(move || {
-        repcxl0.sync_start();
-    });
-    let handle1 = std::thread::spawn(move || {
-        repcxl1.sync_start();
-    });
-
-    handle0.join().expect("Thread 0 panicked");
-    handle1.join().expect("Thread 1 panicked");
-
-    (obj5_coordinator, obj5_replica)
-}
-
 // fn start_two_nodes_with
 /// Assert that a subsequence of states appears in order within the log file.
 pub fn check_state_transitions(actual: &Vec<String>, expected: &[&str]) -> bool {
@@ -75,7 +44,7 @@ fn test_rw_single_node() {
     // let (obj5_coordinator, obj5_replica) = start_two_nodes_and_create_object(vec![node_path]);
 
     // println!("here");
-    let mut repcxls = multi_rcxl2(2, vec![node_path]);
+    let mut repcxls = multi_rcxl(2, vec![node_path]);
     
     // let obj5_coordinator = repcxls[0].new_object(5).expect("failed to get obj with id 5");
     // let obj5_replica = repcxls[1].get_object(5).expect("failed to get obj with id 5");
@@ -134,7 +103,7 @@ fn test_readsafe_multi_node() {
     setup_tmpfs_file(node_path2, TEST_MEMORY_SIZE);
 
     // println!("here");
-    let mut repcxls = multi_rcxl2(2, vec![node_path1, node_path2]);
+    let mut repcxls = multi_rcxl(2, vec![node_path1, node_path2]);
     
     // let obj5_coordinator = repcxls[0].new_object(5).expect("failed to get obj with id 5");
     // let obj5_replica = repcxls[1].get_object(5).expect("failed to get obj with id 5");

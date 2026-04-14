@@ -38,22 +38,22 @@ pub fn single_rcxl(id: usize, node_paths: Vec<&'static str>) -> RepCXL<u64> {
     RepCXL::<u64>::new(config)
 }
 
-pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
-    let mut processes = Vec::new();
-    for i in 0..num {
-        let mut rcxl = single_rcxl(i, node_paths.clone());
-        if i == 0 {
-            rcxl.init_state(); // coordinator inits state
-        }
-        processes.push(rcxl);
+// pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
+//     let mut processes = Vec::new();
+//     for i in 0..num {
+//         let mut rcxl = single_rcxl(i, node_paths.clone());
+//         if i == 0 {
+//             rcxl.init_state(); // coordinator inits state
+//         }
+//         processes.push(rcxl);
 
         
-    }
-    processes
-}
+//     }
+//     processes
+// }
 
 
-pub fn multi_rcxl2(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
+pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
     let mut processes = Vec::new();
     for i in 0..num {
         let mut rcxl = single_rcxl(i, node_paths.clone());
