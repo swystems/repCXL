@@ -73,7 +73,7 @@ impl Ord for Wid {
         match self.round_num.cmp(&other.round_num) {
             std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
             std::cmp::Ordering::Less => std::cmp::Ordering::Less,
-            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id),
+            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id), // smaller pid wins
         }
     }
 }

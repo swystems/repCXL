@@ -148,7 +148,7 @@ pub fn async_best_effort_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
 
 
 
-pub fn sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
+pub fn _sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
     view: crate::GroupView,
     start_instant: Instant,
     round_time: Duration,

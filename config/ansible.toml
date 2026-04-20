@@ -20,22 +20,22 @@ id = 0
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = [0]
+processes = [0, 1, 2]
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
 
 # (ns) Duration of the synchronous round (in nanoseconds)
-round_time = 1000 
+round_time = 500 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "fmonster"
 
 # Enable pipelined write path (true/false)
-pipeline = true
+pipeline = false
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 0
+read_retries = 10
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 2 

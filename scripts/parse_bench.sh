@@ -26,15 +26,15 @@ for file in "$@"; do
 
     # Latency table
     read_avg=$(sed -n '/Read latencies/,/Write latencies/{/avg:/s/.*avg:\t*//p}' "$file")
-    read_p9999=$(sed -n '/Read latencies/,/Write latencies/{/P99.99:/s/.*P99.99:\t*//p}' "$file")
+    read_p99=$(sed -n '/Read latencies/,/Write latencies/{/P99:/s/.*P99:\t*//p}' "$file")
     read_p100=$(sed -n '/Read latencies/,/Write latencies/{/P100:/s/.*P100:\t*//p}' "$file")
 
     write_avg=$(sed -n '/Write latencies/,$ {/avg:/s/.*avg:\t*//p}' "$file")
-    write_p9999=$(sed -n '/Write latencies/,$ {/P99.99:/s/.*P99.99:\t*//p}' "$file")
+    write_p99=$(sed -n '/Write latencies/,$ {/P99:/s/.*P99:\t*//p}' "$file")
     write_p100=$(sed -n '/Write latencies/,$ {/P100:/s/.*P100:\t*//p}' "$file")
 
-    printf "%-7s %12s %12s %12s\n" "" "avg" "P99.99" "P100"
-    printf "%-7s %12s %12s %12s\n" "Read" "$read_avg" "$read_p9999" "$read_p100"
-    printf "%-8s %12s %12s %12s\n" "Write" "$write_avg" "$write_p9999" "$write_p100"
+    printf "%-7s %12s %12s %12s\n" "" "avg" "P99" "P100"
+    printf "%-7s %12s %12s %12s\n" "Read" "$read_avg" "$read_p99" "$read_p100"
+    printf "%-8s %12s %12s %12s\n" "Write" "$write_avg" "$write_p99" "$write_p100"
     echo
 done

@@ -3,6 +3,7 @@ use core::panic;
 
 use super::{MAX_OBJECTS, MAX_PROCESSES};
 use crate::safe_memio;
+use crate::request::Wid;
 
 /// Write Conflict Checker (WCC) register to solve write conflicts
 #[derive(Debug, Clone, Copy)]
@@ -127,9 +128,9 @@ impl ObjectWCC {
     /// Last writer criteria: 
     /// - the winning process has written in the largest round smaller than
     /// the current round
-    /// - in case of conflicts, the larger pid wins
-    pub fn is_last(&mut self, oid_in: usize, current_round:u64, round_in: u64, pid_in: usize) -> bool {
-        if pid_in > MAX_PROCESSES {
+    /// - in case of conflicts, the smaller pid wins
+    pub fn is_last(&mut self, oid_in: usize, current_round:u64, wid: Wid) -> bool {
+        if wid.process_id > MAX_PROCESSES {
             return false; // invalid pid
         }
 
@@ -149,12 +150,11 @@ impl ObjectWCC {
                 continue;
             }
 
-            // @TODO: use Wid comparison wid1 > wid2?
-            if current_round > entry.round && entry.round > round_in {
+            if current_round > entry.round && entry.round > wid.round_num {
                 return false; // another process has written in a larger round
             }
-            if entry.round == round_in && i > pid_in {
-                return false; // another process has larger pid
+            if entry.round == wid.round_num && i < wid.process_id {
+                return false; // another process has smaller pid
             }
         }
         true
@@ -201,6 +201,31 @@ impl ProcessBitmapUncached {
         }
     }
 
+    fn is_largest(&self, pid: usize) -> bool {
+        let byte_index = pid / 64;
+        let bit_index = pid % 64;
+
+        // Check if any higher bit is set
+        for i in (byte_index + 1)..self.data.len() {
+            if self.data[i] != 0 {
+                return false; // another process with larger pid has written
+            }
+        }
+        // Check bits in the same byte
+        let mask = !((1 << (bit_index + 1)) - 1); // Mask for bits higher than bit_index
+        (self.data[byte_index] & mask) == 0
+    }
+
+    fn largest(&self) -> Option<usize> {
+        for word_index in (0..self.data.len()).rev() {
+            let word = self.data[word_index];
+            if word != 0 {
+                let bit = 63 - word.leading_zeros() as usize;
+                return Some(word_index * 64 + bit);
+            }
+        }
+        None
+    }
 
     fn is_smallest(&self, pid: usize) -> bool {
         let byte_index = pid / 64;
@@ -227,17 +252,66 @@ impl ProcessBitmapUncached {
         }
         None
     }
+}
 
+/// Byte map to track processes that have written to an object for FastWCC implementation.
+/// Each process owns one byte slot (0/1) to avoid shared-word bit RMW conflicts.
+#[cfg(target_arch = "x86_64")]
+#[derive(Debug, Clone, Copy)]
+struct ProcessByteMapUncached {
+    data: [u8; MAX_PROCESSES],
+    size: usize,
+}
+
+impl ProcessByteMapUncached {
+    fn new() -> Self {
+        ProcessByteMapUncached {
+            data: [0; MAX_PROCESSES],
+            size: MAX_PROCESSES,
+        }
+    }
+
+    /// Cache flush the byte map to ensure write is committed to memory
+    unsafe fn cfw(&self) {
+        safe_memio::cache_flush_write(self.data.as_ptr(), self.size);
+    }
+
+    /// Cache flush the byte map (=cache invalidate) to ensure subsequent read from memory
+    unsafe fn cfr(&self) {
+        safe_memio::cache_flush_read(self.data.as_ptr(), self.size);
+    }
+
+    fn set(&mut self, pid: usize, val: bool) {
+        self.data[pid] = if val { 1 } else { 0 };
+    }
+
+    fn is_smallest(&self, pid: usize) -> bool {
+        for i in 0..pid {
+            if self.data[i] != 0 {
+                return false;
+            }
+        }
+        self.data[pid] != 0
+    }
+
+    fn smallest(&self) -> Option<usize> {
+        for pid in 0..MAX_PROCESSES {
+            if self.data[pid] != 0 {
+                return Some(pid);
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct FastWCC {
-    obm: [ProcessBitmapUncached; MAX_OBJECTS] // object bitmaps
+    obm: [ProcessByteMapUncached; MAX_OBJECTS] // object byte maps
 }
 
 impl FastWCC {
     pub fn new() -> Self {
-        FastWCC { obm: [ProcessBitmapUncached::new(); MAX_OBJECTS] }
+        FastWCC { obm: [ProcessByteMapUncached::new(); MAX_OBJECTS] }
     }
 
     /// Mark the process as a writer for the given object.

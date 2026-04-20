@@ -1,19 +1,36 @@
-Date: 20260414_1119
-YCSB workload: workloada_64_large
+Date: 20260420_2004
+YCSB workload: workloada_64_medium
 
 ============= RepCXL configuration =============
-processes = [0]
-algorithm = "async_best_effort"
-pipeline = true
-round_time = 1000 
-read_retries = 0
+processes = [0, 1, 2]
+algorithm = "fmonster"
+pipeline = false
+round_time = 500 
+read_retries = 10
 # core_affinity = 2 
 ============= Benchmark Results =============
 
-=== hardanger.dat ===
-Ops: 2010000  Time: 8.33s  Throughput: 241167.74 ops/sec
-Dirty reads: 0 / 1004448 (0.000%)
-                 avg       P99.99         P100
-Read         4.08μs     17.55μs       4.92ms
-Write         3.85μs     17.79μs       4.94ms
+=== p0.dat ===
+Monster: conflicts=6, sync_failures=3015971, empty_requests=0, try_overtime=1005327, check_overtime=1005327, replicate_overtime=1005317
+Ops: 2010000  Time: 6.59s  Throughput: 305115.51 ops/sec
+Dirty reads: 4 / 1004677 (0.000%)
+                 avg          P99         P100
+Read         1.41μs      1.82μs       5.09ms
+Write         4.97μs      6.33μs       5.06ms
+
+=== p1.dat ===
+Monster: conflicts=1094, sync_failures=3013019, empty_requests=0, try_overtime=1005586, check_overtime=1002817, replicate_overtime=1004616
+Ops: 2010000  Time: 5.45s  Throughput: 368805.60 ops/sec
+Dirty reads: 3 / 1005370 (0.000%)
+                 avg          P99         P100
+Read         1.17μs      1.62μs       4.99ms
+Write         4.08μs      5.24μs       5.05ms
+
+=== p2.dat ===
+Monster: conflicts=2107, sync_failures=3019646, empty_requests=0, try_overtime=1007251, check_overtime=1007251, replicate_overtime=1005144
+Ops: 2010000  Time: 6.58s  Throughput: 305396.46 ops/sec
+Dirty reads: 5 / 1004714 (0.000%)
+                 avg          P99         P100
+Read         1.41μs      1.81μs       4.42ms
+Write         4.97μs      6.39μs       4.52ms
 

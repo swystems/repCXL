@@ -82,9 +82,10 @@ impl MonsterStats {
     }
 
     pub fn print(&self) {
+        let overtimes = self.try_overtime + self.check_overtime + self.replicate_overtime;
         log::info!("Monster stats: conflicts={}, sync_failures={}, empty_requests={}, try_overtime={}, check_overtime={}, replicate_overtime={}", 
             self.conflicts, 
-            self.sync_failures, 
+            overtimes, 
             self.empty_requests, 
             self.try_overtime,
             self.check_overtime,
@@ -174,7 +175,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
             },
             
             MonsterState::Check => {
-                if owcc.is_last(obj_info.id, round_num, wid.round_num, wid.process_id) {
+                if owcc.is_last(obj_info.id, round_num, wid) {
                     // current process is the last writer
                     monster_info!(monster_state, "Process {} is the last writer for object {} in round {}", view.self_id, obj_info.id, round_num);
                     monster_state = MonsterState::Replicate;
@@ -336,7 +337,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
             obj_info.id
         );
 
-        let _ = stats.update_sync_failure(round_num);
+        // let _ = stats.update_sync_failure(round_num);
 
         // Log state transition if logging is enabled
         if let Some(ref mut logger) = mslog {
@@ -382,7 +383,6 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
                             );
 
                             monster_state = MonsterState::Replicate;
-                            fwcc.clear(obj_info.id, view.self_id);
                         } else {
                             // not the last writer
                             last_writer_pid = last_writer;
@@ -410,6 +410,8 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
             }
 
             MonsterState::Replicate => {
+                fwcc.clear(obj_info.id, view.self_id);
+
                 let ome = ObjectMemoryEntry::new(wid, data);
 
                 let result = mem_writeall(obj_info.offset, ome, &view.memory_nodes)

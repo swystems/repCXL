@@ -26,7 +26,6 @@
       shell: |
         bin/ycsb load basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_load.dat
         bin/ycsb run basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_run.dat
-
       args:
         executable: /bin/bash
         chdir: "{{ ycsb_remote_source_dir }}"

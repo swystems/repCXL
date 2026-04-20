@@ -43,7 +43,7 @@ pub(crate) unsafe fn clflushopt_range(addr: *const u8, size: usize) {
 #[inline(always)]
 pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
-    _mm_sfence();
+    _mm_mfence();
 }
 
 /// Flush + mfence: ensures cache lines are evicted before subsequent loads.
