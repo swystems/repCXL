@@ -1,6 +1,8 @@
 use super::MAX_OBJECTS;
 use log::{info, warn};
 
+const CHUNK_SIZE: usize = 64; // required for write operation alignment constraints
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ObjectInfo {
     pub(crate) id: usize,
@@ -60,8 +62,8 @@ impl ObjectIndex {
     /// * 'id' - Unique identifier for the object.
     /// * `size` - Size of the memory to allocate.
     pub(crate) fn alloc_object(&mut self, id: usize, size: usize) -> Option<usize> {
-        let chunks = (size + self.chunk_size - 1) / self.chunk_size; // Round up to nearest chunk size
-        let size = chunks * self.chunk_size;
+        let chunks = (size + CHUNK_SIZE - 1) / CHUNK_SIZE; // Round up to nearest chunk size
+        let size = chunks * CHUNK_SIZE;
 
         if self.allocated_size + size > self.total_size {
             warn!("Not enough space");

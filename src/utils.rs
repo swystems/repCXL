@@ -6,16 +6,17 @@ pub mod ycsb;
 pub mod ms_logger;
 
 
-pub fn percentile(latencies: &Vec<u64>, p: f32) -> u64 {
-    if latencies.is_empty() {
+pub fn percentile(lat_sorted: &Vec<u64>, p: f32) -> u64 {
+    if lat_sorted.is_empty() {
         return 0;
     }
-    let mut sorted = latencies.clone();
-    sorted.sort_unstable();
-    let index = (p * sorted.len() as f32).ceil() as usize - 1;
-    sorted[index]
+    let index = (p * lat_sorted.len() as f32).ceil() as usize - 1;
+    lat_sorted[index]
 }
 
+fn downsample(lat_sorted: &Vec<u64>, samples: usize) -> Vec<u64> {
+    lat_sorted.iter().step_by(lat_sorted.len() / samples).cloned().collect()
+}
 
 /// Format nanoseconds into the most human-readable unit.
 fn fmt_ns(ns: u64) -> String {
@@ -32,12 +33,16 @@ fn fmt_ns(ns: u64) -> String {
 
 pub fn print_latency_stats(latencies: &Vec<Duration>) {
     let avg_ns = latencies.iter().sum::<Duration>().as_nanos() as u64 / latencies.len() as u64;
-    let latencies_u64: Vec<u64> = latencies.iter().map(|d| d.as_nanos() as u64).collect();
+    let mut latencies_u64: Vec<u64> = latencies.iter().map(|d| d.as_nanos() as u64).collect();
+    latencies_u64.sort_unstable(); // sort latencies for percentile calculation
     let p50 = percentile(&latencies_u64, 0.5);
     let p90 = percentile(&latencies_u64, 0.9);
     let p99 = percentile(&latencies_u64, 0.99);
     let p9999 = percentile(&latencies_u64, 0.9999);
     let p100 = *latencies_u64.iter().max().unwrap_or(&0);
+    let mut vec100 = downsample(&latencies_u64, 100);
+    vec100.push(p100); // ensure max latency is included in the vector
+    println!("vec100: {:?}", vec100);
     println!("    avg:\t{}
     P50:\t{} (median)
     P90:\t{}

@@ -296,7 +296,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             return None;
         }
 
-        let size = std::mem::size_of::<ObjectMemoryEntry<T>>(); // padded and aligned
+        let size = std::mem::size_of::<ObjectMemoryEntry<T>>();
 
         let mut state = self.read_state_from_any().unwrap();
 

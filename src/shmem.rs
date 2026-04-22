@@ -113,10 +113,13 @@ impl MemoryNode {
 
         let ptr = ptr as *mut u8;
 
+        // ensure the object area starts at a 64B aligned address after the state
+        let offset_64aligned = STATE_SIZE / 64 * 64 + 64; 
+        
         MemoryNode {
             id,
             state_addr: ptr as *mut SharedState,
-            obj_addr: unsafe { ptr.offset(STATE_SIZE as isize) },
+            obj_addr: unsafe { ptr.offset(offset_64aligned as isize) },
             size,
         }
     }

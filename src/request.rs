@@ -49,6 +49,7 @@ pub enum ReadReturn<T> {
 /// RepCXL write request unique identifier. Stored next to every object
 /// Comparison checks for largest round number and smallest process ID if
 /// round numbers are equal.
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Wid {
     pub round_num: u64,

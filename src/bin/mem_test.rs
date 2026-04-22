@@ -11,7 +11,7 @@ use std::cell::Cell;
 
 use clap::{Arg, Command, value_parser};
 use libc::{mmap, munmap, MAP_SHARED, PROT_READ, PROT_WRITE};
-
+use core::arch::x86_64::*;
 const CACHE_LINE_SIZE: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +32,7 @@ unsafe fn cache_flush_fence(addr: *const u8, size: usize) {
         core::arch::asm!("clflushopt [{}]", in(reg) ptr, options(nostack, preserves_flags));
         ptr += CACHE_LINE_SIZE;
     }
-    core::arch::x86_64::_mm_mfence();
+    _mm_mfence();
 }
 
 // ── write variants ──────────────────────────────────────────────────────────
@@ -58,6 +58,27 @@ unsafe fn write_plain(addr: *mut u8, size: usize) {
         std::ptr::write(addr.add(off), 0xAB);
     }
 }
+
+
+unsafe fn nvwrite(addr: *mut u8, size: usize) {
+        let size64_padded = (size + 63) / 64 * 64; // 64B aligned size
+        let chunk = _mm512_set1_epi8(0xABu8 as i8);
+        let mut off = 0usize;
+
+        while off + 64 <= size64_padded {
+            let dst = addr.add(off);
+            if (dst as usize) % 64 == 0 {
+                _mm512_stream_si512(dst as *mut __m512i, chunk);
+            } else {
+                _mm512_storeu_si512(dst as *mut __m512i, chunk);
+            }
+            off += 64;
+        }
+
+        _mm_sfence(); // ensure all stores are globally visible
+}
+
+
 
 // ── read variants ───────────────────────────────────────────────────────────
 
@@ -287,6 +308,7 @@ fn main() {
         });
     }
 
+
     
     // ── WRITE benchmarks ────────────────────────────────────────────────
 
@@ -321,6 +343,17 @@ fn main() {
             let offset = addresses[idx % addresses.len()];
             counter.set(idx + 1);
             write_volatile_flush(base.add(offset), obj_size);
+            0
+        });
+    }
+
+    {
+        let counter = Cell::new(0usize);
+        bench("nvwrite", iterations, || unsafe {
+            let idx = counter.get();
+            let offset = 0;
+            counter.set(idx + 1);
+            nvwrite(base.add(offset), obj_size);
             0
         });
     }

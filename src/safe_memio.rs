@@ -12,7 +12,7 @@ use rand::prelude::IndexedRandom;  // Enables choose() on slices
 use crate::request::Wid;
 use crate::shmem::MemoryNode;
 use log::error;
-use core::arch::x86_64::{_mm_mfence, _mm_sfence};
+use core::arch::x86_64::*;
 
 const FAILURE_PROBABILITY: f32 = 0.0;
 pub const CACHE_LINE_SIZE: usize = 64;
@@ -67,8 +67,10 @@ pub struct MemoryError(pub usize);
 
 
 /// ObjectMemoryEntry. Stores the current write ID and the value of the object
-/// in memory.
-#[derive(Debug, Clone, Copy)]
+/// in memory. Currently allocation the algorithm chunk size ensures that 
+/// each entry is aligned and padded to 64B
+#[repr(C, align(64))]
+#[derive(Debug, Copy, Clone)]
 pub struct ObjectMemoryEntry<T> {
     pub wid: Wid,
     pub value: T,
@@ -85,7 +87,61 @@ impl<T: Copy> ObjectMemoryEntry<T> {
             value,
         }
     }
+
+    fn as_ptr(&self) -> *const u8 {
+        self as *const Self as *const u8
+    }
 }
+
+/// Non-temporal write of an ObjectMemoryEntry to the given address, bypassing cache. 
+/// However, this function might return earlier than the write is visibe to 
+/// _other nodes_, it only ensures visibility across different processes in the same
+/// node. 
+#[cfg(target_arch = "x86_64")]
+unsafe fn _nvwrite<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) {
+    let mut len_64pad = (size_of::<ObjectMemoryEntry<T>>() + 63) / 64 * 64; // 64B aligned size
+    let mut src_ptr = data.as_ptr();
+    let mut dest_ptr = addr as *mut u8;
+
+
+    log::debug!("alginment of dest_ptr: {}, size of entry: {}, len_64pad: {}", 
+        (dest_ptr as usize) % 64, 
+        size_of::<ObjectMemoryEntry<T>>(), 
+        len_64pad);
+
+    while len_64pad >= 64 {
+        // Load 64 bytes from string (unaligned load is fine for source)
+        let chunk = _mm512_stream_load_si512(src_ptr as *const __m512i);
+        
+        // Non-temporal store, must be 64B aligned (ensured by allocation)
+        _mm512_stream_si512(dest_ptr as *mut __m512i, chunk);
+
+        src_ptr = src_ptr.add(64);
+        dest_ptr = dest_ptr.add(64);
+        len_64pad -= 64;
+    }
+
+    // 2. Process remaining 8-byte chunks
+    // while len >= 8 {
+    //     let mut val: u64 = 0;
+    //     core::ptr::copy_nonoverlapping(src_ptr, &mut val as *mut u64 as *mut u8, 8);
+    //     _mm_stream_si64(dest_ptr as *mut i64, val as i64);
+        
+    //     src_ptr = src_ptr.add(8);
+    //     dest_ptr = dest_ptr.add(8);
+    //     len -= 8;
+    // }
+
+    // // 3. Handle any tiny remainder (1-7 bytes) 
+    // // Standard stores are okay here, or just pad to 8 bytes above.
+    // if len > 0 {
+    //     core::ptr::copy_nonoverlapping(src_ptr, dest_ptr, len);
+    // }
+
+    // 4. Final Fence to ensure CXL sees all writes
+    _mm_sfence();
+}
+
 
 pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
     if FAILURE_PROBABILITY > 0.0 {
@@ -191,7 +247,7 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
         unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
     }
     // wait for flush to complete before reading
-    unsafe { _mm_mfence(); }
+    unsafe { _mm_lfence(); }
 
     let start = std::time::Instant::now(); // debug read times
 
