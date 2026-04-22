@@ -18,7 +18,7 @@ fi
 
 export RUST_LOG=info 
 
-target/release/ycsb_client \
+taskset -c 2$REPCXL_ID target/release/ycsb_client \
     ycsb/traces/${WORKLOAD}_load.dat \
     ycsb/traces/${WORKLOAD}_run.dat \
     --config ${CONFIG} \

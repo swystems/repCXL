@@ -26,7 +26,7 @@ processes = [0, 1, 2]
 startup_delay = 1000000000
 
 # (ns) Duration of the synchronous round (in nanoseconds)
-round_time = 500 
+round_time = 400 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "fmonster"
@@ -35,7 +35,7 @@ algorithm = "fmonster"
 pipeline = false
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 10
+read_retries = 100
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 2 

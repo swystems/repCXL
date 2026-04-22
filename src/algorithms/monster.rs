@@ -410,7 +410,6 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
             }
 
             MonsterState::Replicate => {
-                fwcc.clear(obj_info.id, view.self_id);
 
                 let ome = ObjectMemoryEntry::new(wid, data);
 
@@ -422,6 +421,8 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
                 if is_overtime(round_start, actx.round_time) {
                     stats.replicate_overtime += 1;
                 }
+
+                fwcc.clear(obj_info.id, view.self_id);
 
                 return result;
             }

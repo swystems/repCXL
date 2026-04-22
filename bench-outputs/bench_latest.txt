@@ -1,36 +1,36 @@
-Date: 20260420_2004
-YCSB workload: workloada_64_medium
+Date: 20260421_1722
+YCSB workload: workloada_64_large
 
 ============= RepCXL configuration =============
 processes = [0, 1, 2]
 algorithm = "fmonster"
 pipeline = false
-round_time = 500 
-read_retries = 10
+round_time = 400 
+read_retries = 100
 # core_affinity = 2 
 ============= Benchmark Results =============
 
 === p0.dat ===
-Monster: conflicts=6, sync_failures=3015971, empty_requests=0, try_overtime=1005327, check_overtime=1005327, replicate_overtime=1005317
-Ops: 2010000  Time: 6.59s  Throughput: 305115.51 ops/sec
-Dirty reads: 4 / 1004677 (0.000%)
+Monster: conflicts=202, sync_failures=30018014, empty_requests=0, try_overtime=10005957, check_overtime=10006147, replicate_overtime=10005910
+Ops: 20010000  Time: 46.18s  Throughput: 433341.03 ops/sec
+Dirty reads: 1 / 10003905 (0.000%)
                  avg          P99         P100
-Read         1.41μs      1.82μs       5.09ms
-Write         4.97μs      6.33μs       5.06ms
+Read         1.05μs      1.35μs      11.22ms
+Write         3.36μs      4.11μs      11.23ms
 
 === p1.dat ===
-Monster: conflicts=1094, sync_failures=3013019, empty_requests=0, try_overtime=1005586, check_overtime=1002817, replicate_overtime=1004616
-Ops: 2010000  Time: 5.45s  Throughput: 368805.60 ops/sec
-Dirty reads: 3 / 1005370 (0.000%)
+Monster: conflicts=20039, sync_failures=30015559, empty_requests=0, try_overtime=10011771, check_overtime=10011931, replicate_overtime=9991857
+Ops: 20010000  Time: 46.23s  Throughput: 432863.60 ops/sec
+Dirty reads: 1 / 10010651 (0.000%)
                  avg          P99         P100
-Read         1.17μs      1.62μs       4.99ms
-Write         4.08μs      5.24μs       5.05ms
+Read         1.05μs      1.35μs      11.46ms
+Write         3.38μs      4.10μs      11.49ms
 
 === p2.dat ===
-Monster: conflicts=2107, sync_failures=3019646, empty_requests=0, try_overtime=1007251, check_overtime=1007251, replicate_overtime=1005144
-Ops: 2010000  Time: 6.58s  Throughput: 305396.46 ops/sec
-Dirty reads: 5 / 1004714 (0.000%)
+Monster: conflicts=43816, sync_failures=30051537, empty_requests=0, try_overtime=10031673, check_overtime=10031840, replicate_overtime=9988024
+Ops: 20010000  Time: 46.37s  Throughput: 431547.01 ops/sec
+Dirty reads: 1 / 10007343 (0.000%)
                  avg          P99         P100
-Read         1.41μs      1.81μs       4.42ms
-Write         4.97μs      6.39μs       4.52ms
+Read         1.06μs      1.36μs      11.51ms
+Write         3.38μs      4.23μs      14.18ms
 
