@@ -11,6 +11,7 @@ use rand::Rng;
 use rand::prelude::IndexedRandom;  // Enables choose() on slices
 use crate::request::Wid;
 use crate::shmem::MemoryNode;
+use crate::timer;
 use log::error;
 use core::arch::x86_64::*;
 
@@ -44,6 +45,9 @@ pub(crate) unsafe fn clflushopt_range(addr: *const u8, size: usize) {
 pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
     _mm_mfence();
+
+    // delay by measured CXL switch delay in switchless setups after flush operation
+    timer::cxl_switch_delay();
 }
 
 /// Flush + mfence: ensures cache lines are evicted before subsequent loads.
@@ -53,6 +57,9 @@ pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
 pub(crate) unsafe fn cache_flush_read(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
     _mm_mfence();
+
+    // delay by measured CXL switch delay in switchless setups after flush operation
+    timer::cxl_switch_delay();
 }
 
 pub(crate) fn mem_write_flush<T: Copy>(addr: *mut T, data: T) {
@@ -64,6 +71,7 @@ pub(crate) fn mem_write_flush<T: Copy>(addr: *mut T, data: T) {
 
 #[derive(Debug)]
 pub struct MemoryError(pub usize);
+
 
 
 /// ObjectMemoryEntry. Stores the current write ID and the value of the object
@@ -153,7 +161,12 @@ pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEn
     }
 
     // mechanism to handle segfault here, signal catch plus backup process
+    
+    // write to memory
     unsafe { std::ptr::write_volatile(addr, data); }
+
+
+    
     Ok(())
 }
 
@@ -166,6 +179,9 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
         }
     }
     // mechanism to handle segfault here, signal catch plus backup process
+
+    // delay by measured CXL switch delay in switchless setups
+    timer::cxl_switch_delay();
 
     Ok(unsafe { std::ptr::read_volatile(addr) })
 }
@@ -208,6 +224,10 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
 
     // fence once only after all writes to all mem nodes are flushed
     unsafe { _mm_mfence(); }
+
+    // delay by measured CXL switch delay in switchless setups after flush 
+    // operation
+    timer::cxl_switch_delay();
 
     Ok(())
 }

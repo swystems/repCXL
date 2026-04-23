@@ -272,11 +272,15 @@ impl ProcessByteMapUncached {
     }
 
     /// Cache flush the byte map to ensure write is committed to memory
+    /// the operation is currently delayed to simulate CXL switch delay
+    /// in switchless setups
     unsafe fn cfw(&self) {
         safe_memio::cache_flush_write(self.data.as_ptr(), self.size);
     }
 
     /// Cache flush the byte map (=cache invalidate) to ensure subsequent read from memory
+    /// the operation is currently delayed to simulate CXL switch delay
+    /// in switchless setups
     unsafe fn cfr(&self) {
         safe_memio::cache_flush_read(self.data.as_ptr(), self.size);
     }
