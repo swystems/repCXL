@@ -41,8 +41,8 @@ for file in "$@"; do
     write_p9999=$(sed -n '/Write latencies/,$ {/P99.99:/s/.*P99.99:\t*//p}' "$file")
     write_p100=$(sed -n '/Write latencies/,$ {/P100:/s/.*P100:\t*//p}' "$file")
 
-    printf "%-7s %12s %12s %12s\n" "" "avg" "P99" "P99.99" "P100"
-    printf "%-7s %12s %12s %12s\n" "Read" "$read_avg" "$read_p99" "$read_p9999" "$read_p100"
-    printf "%-8s %12s %12s %12s\n" "Write" "$write_avg" "$write_p99" "$write_p9999" "$write_p100"
+    printf "%-7s %12s %12s %12s %12s\n" "" "avg" "P99" "P99.99" "P100"
+    printf "%-7s %12s %12s %12s %12s\n" "Read" "$read_avg" "$read_p99" "$read_p9999" "$read_p100"
+    printf "%-8s %12s %12s %12s %12s\n" "Write" "$write_avg" "$write_p99" "$write_p9999" "$write_p100"
     echo
 done
