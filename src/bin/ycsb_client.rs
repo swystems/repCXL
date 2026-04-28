@@ -163,10 +163,10 @@ fn main() {
                 match rcxl.read_object(obj) {
                     Ok(rr) => {
                         match rr {
-                            ReadReturn::ReadDirty(v) => {
+                            ReadReturn::ReadDirty(_) => {
                                 dirty_reads += 1;
                             
-                                rcxl.write_object(obj, v).expect("Failed to write back dirty read value");
+                                // rcxl.write_object(obj, rdp.data).expect("Failed to write back dirty read value");
                             }
                             ReadReturn::ReadSafe(_) => safe_reads += 1,
                         }

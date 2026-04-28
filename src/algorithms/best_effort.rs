@@ -6,6 +6,7 @@ use crate::{ObjectMemoryEntry,ReadReturn};
 use crate::utils::ms_logger::MonsterStateLogger;
 use crate::safe_memio::{mem_writeall, mem_readends, MemoryError};
 use crate::{GroupView, WriteRequest, ReadRequest};
+use crate::request::{ReadDirtyPayload};
 use crate::timer;
 use super::AlgorithmThreadContext;
 
@@ -16,7 +17,7 @@ const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
 /// Client-writer: clients perform write operation directly i.e. no write
 /// thread request handling.
 pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
-    view: &crate::GroupView,
+    view: &crate::GroupView<T>,
     obj_info: &crate::ObjectInfo,
     data: T,
 ) -> Result<(), String> {
@@ -31,7 +32,7 @@ pub fn async_best_effort_write<T: Copy + PartialEq + std::fmt::Debug>(
 
 
 pub fn async_best_effort_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    view: GroupView,
+    view: GroupView<T>,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,
     stop_flag: Arc<AtomicBool>,
 ) {
@@ -88,7 +89,7 @@ pub fn async_best_effort_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
 /// Client-reader: clients perform read operation directly i.e. no read thread
 /// processing requests
 pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
-    view: &crate::GroupView,
+    view: &crate::GroupView<T>,
     obj_info: &crate::ObjectInfo,
 ) -> Result<ReadReturn<T>, String> {
 
@@ -101,7 +102,13 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
             let result = if consistent {
                 ReadReturn::ReadSafe(states[0].value)
             } else {
-                ReadReturn::ReadDirty(states[0].value)
+                ReadReturn::ReadDirty(
+                    ReadDirtyPayload { 
+                        wid: states[0].wid,
+                        obj_info: *obj_info, 
+                        data: states[0].value 
+                    }
+                )
             };
             Ok(result)
         },
@@ -116,7 +123,7 @@ pub fn async_best_effort_read<T: Copy + PartialEq + std::fmt::Debug>(
 /// ReadReturn. inter-thread communication might lead to overhead, prefer 
 /// _client version for better latency  
 pub fn async_best_effort_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmThreadContext,
+    actx: AlgorithmThreadContext<T>,
     req_queue: kanal::Receiver<ReadRequest<T>>,
 ) {
     let view = actx.group_view;
@@ -149,7 +156,7 @@ pub fn async_best_effort_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
 
 
 pub fn _sync_best_effort<T: Copy + PartialEq + std::fmt::Debug>(
-    view: crate::GroupView,
+    view: crate::GroupView<T>,
     start_instant: Instant,
     round_time: Duration,
     req_queue_rx: kanal::Receiver<WriteRequest<T>>,

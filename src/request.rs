@@ -40,10 +40,17 @@ impl<T> ReadRequest<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
+pub struct ReadDirtyPayload<T>{
+    pub wid: Wid,
+    pub(crate) obj_info: ObjectInfo,
+    pub data: T,
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum ReadReturn<T> {
     ReadSafe(T),
-    ReadDirty(T),
+    ReadDirty(ReadDirtyPayload<T>),
 }
 
 /// RepCXL write request unique identifier. Stored next to every object

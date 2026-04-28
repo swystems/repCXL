@@ -4,14 +4,14 @@ use log::{info, warn};
 const CHUNK_SIZE: usize = 64; // required for write operation alignment constraints
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ObjectInfo {
-    pub(crate) id: usize,
-    pub(crate) offset: usize,
-    pub(crate) size: usize,
+pub struct ObjectInfo {
+    pub id: usize,
+    pub offset: usize,
+    pub size: usize,
 }
 
 impl ObjectInfo {
-    pub(crate) fn new(id: usize, offset: usize, size: usize) -> Self {
+    pub fn new(id: usize, offset: usize, size: usize) -> Self {
         ObjectInfo { id, offset, size }
     }
 }
@@ -21,19 +21,17 @@ impl ObjectInfo {
 ///
 /// @TODO: add coordinator-only write checks
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct ObjectIndex {
+pub struct ObjectIndex {
     total_size: usize,
     allocated_size: usize,
-    chunk_size: usize,
     object_index: [Option<ObjectInfo>; MAX_OBJECTS],
 }
 
 impl ObjectIndex {
-    pub(crate) fn new(total_size: usize, chunk_size: usize) -> Self {
+    pub(crate) fn new(total_size: usize) -> Self {
         ObjectIndex {
             total_size,
             allocated_size: 0,
-            chunk_size,
             object_index: [None; MAX_OBJECTS], // Initialize with None
         }
     }

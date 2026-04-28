@@ -9,7 +9,6 @@ use serde::{Deserialize, Deserializer};
 
 // default values for config parameters
 const DEFAULT_MEM_SIZE: usize = 1024 * 1024; // 1 MiB
-const DEFAULT_CHUNK_SIZE: usize = 64; // 64 bytes
 const DEFAULT_STARTUP_DELAY: u64 = 1000000000; // 1s
 const DEFAULT_ROUND_TIME_NS: u64 = 100000; //1ms
 const DEFAULT_PROCESSES: &[u32] = &[0]; // default to single process with ID 0
@@ -18,6 +17,7 @@ const DEFAULT_PIPELINE: bool = false;
 const DEFAULT_READ_RETRIES: usize = 0;
 const DEFAULT_CORE_AFFINITY: Option<usize> = None;
 const DEFAULT_READ_OFFSET: Option<f64> = None;
+const DEFAULT_LOG_NODE: &str = "";
 
 
 
@@ -81,7 +81,6 @@ where
 pub struct RepCXLConfig {
     pub mem_nodes: Vec<String>,
     pub mem_size: usize,
-    pub chunk_size: usize,
     pub startup_delay: u64,
     pub round_time: u64,
     pub id: i32,
@@ -92,6 +91,7 @@ pub struct RepCXLConfig {
     pub read_retries: usize,
     pub read_offset: Option<f64>,
     pub core_affinity: Option<usize>,
+    pub log_node: String,
 }
 
 impl Default for RepCXLConfig {
@@ -99,7 +99,6 @@ impl Default for RepCXLConfig {
         Self {
             mem_nodes: Vec::new(),
             mem_size: DEFAULT_MEM_SIZE,
-            chunk_size: DEFAULT_CHUNK_SIZE,
             startup_delay: DEFAULT_STARTUP_DELAY,
             round_time: DEFAULT_ROUND_TIME_NS,
             id: -1, // -1 indicates no id provided in config file
@@ -109,6 +108,7 @@ impl Default for RepCXLConfig {
             read_retries: DEFAULT_READ_RETRIES,
             read_offset: DEFAULT_READ_OFFSET,
             core_affinity: DEFAULT_CORE_AFFINITY,
+            log_node: DEFAULT_LOG_NODE.to_string(),
         }
     }
 }
@@ -155,6 +155,11 @@ impl RepCXLConfig {
             if core == 0 {
                 return Err(format!("{} Avoid using core 0", err_prefix));
             }
+        }
+
+        // log node path must not be empty
+        if self.log_node.is_empty() {
+            return Err(format!("{} log_node must be specified in the config", err_prefix));
         }
 
         Ok(())

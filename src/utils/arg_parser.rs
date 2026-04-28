@@ -104,6 +104,13 @@ impl ArgParser {
                     .long("core-affinity")
                     .help("CPU core to pin the repCXL write thread to")
                     .value_parser(value_parser!(usize)),
+            )
+            .arg(
+                Arg::new("log_node")
+                    .short('l')
+                    .long("log-path")
+                    .help("Path used for log node output")
+                    .value_parser(value_parser!(String)),
             );
 
 
@@ -149,6 +156,9 @@ impl ArgParser {
         }
         if let Some(core_affinity) = matches.remove_one::<usize>("core_affinity") {
             self.config.core_affinity = Some(core_affinity);
+        }
+        if let Some(log_node) = matches.remove_one::<String>("log_node") {
+            self.config.log_node = log_node;
         }
 
         // validate config values

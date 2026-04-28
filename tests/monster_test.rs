@@ -4,6 +4,7 @@
 use rep_cxl::request::ReadReturn;
 use rep_cxl::utils::ms_logger;
 use std::time::Duration;
+use std::vec;
 
 mod test_utils;
 use test_utils::*;
@@ -44,14 +45,9 @@ fn test_rw_single_node() {
     // let (obj5_coordinator, obj5_replica) = start_two_nodes_and_create_object(vec![node_path]);
 
     // println!("here");
-    let mut repcxls = multi_rcxl(2, vec![node_path]);
-    
-    // let obj5_coordinator = repcxls[0].new_object(5).expect("failed to get obj with id 5");
-    // let obj5_replica = repcxls[1].get_object(5).expect("failed to get obj with id 5");
-
-    let mut coordinator = repcxls.remove(0);
 
     std::thread::spawn(move || {
+        let mut coordinator = single_rcxl(0, vec![node_path]);
         coordinator.sync_start();
         let obj5 = coordinator.new_object(5).expect("failed to get obj with id 5");   
         let read_val = coordinator.read_object(&obj5).expect("Read should succeed");
@@ -69,9 +65,10 @@ fn test_rw_single_node() {
     });
     // Read returns the initial value
     
+    std::thread::sleep(Duration::from_millis(100)); // wait for write to propagate
 
-    let mut replica = repcxls.remove(0);
     std::thread::spawn(move || {
+        let mut replica = single_rcxl(1, vec![node_path]);
         replica.sync_start();
 
         // wait for coordinator to finish
@@ -102,15 +99,15 @@ fn test_readsafe_multi_node() {
     setup_tmpfs_file(node_path1, TEST_MEMORY_SIZE);
     setup_tmpfs_file(node_path2, TEST_MEMORY_SIZE);
 
-    // println!("here");
-    let mut repcxls = multi_rcxl(2, vec![node_path1, node_path2]);
+    // let mut repcxls = multi_rcxl(2, vec![node_path1, node_path2]);
     
     // let obj5_coordinator = repcxls[0].new_object(5).expect("failed to get obj with id 5");
     // let obj5_replica = repcxls[1].get_object(5).expect("failed to get obj with id 5");
 
-    let mut coordinator = repcxls.remove(0);
 
     std::thread::spawn(move || {
+        let mut coordinator = single_rcxl(0, vec![node_path1, node_path2]);
+
         coordinator.sync_start();
         let obj5 = coordinator.new_object(5).expect("failed to get obj with id 5");   
         let read_val = coordinator.read_object(&obj5).expect("Read should succeed");
@@ -128,10 +125,15 @@ fn test_readsafe_multi_node() {
     });
     // Read returns the initial value
     
+    std::thread::sleep(Duration::from_millis(100)); // wait for write to propagate
 
-    let mut replica = repcxls.remove(0);
+
+    // let mut replica = repcxls.remove(0);
     std::thread::spawn(move || {
+        let mut replica = single_rcxl(1, vec![node_path1, node_path2]);
+
         replica.sync_start();
+
 
         // wait for coordinator to finish
         std::thread::sleep(Duration::from_millis(100));
@@ -169,15 +171,9 @@ fn test_readdirty() {
     for path in &node_paths {
         setup_tmpfs_file(path, TEST_MEMORY_SIZE);
     }
-    // RepCXL instance 1: uses nodes 1 and 2
-    let mut repcxl_a = single_rcxl(0, vec![node_paths[0], node_paths[1]]);
-    repcxl_a.register_process(1);
-    repcxl_a.init_state();
+    
 
-    // RepCXL instance 2: uses nodes 0 and 2
-    let mut repcxl_b = single_rcxl(1, vec![node_paths[0], node_paths[2]]);
-    repcxl_b.register_process(0);
-
+    
 
 
     // a hacky way to simulate a write conflict using instances with different node sets.
@@ -187,7 +183,13 @@ fn test_readdirty() {
     // value 0
 
     // Start both instances
+    let mn01 = vec![node_paths[0], node_paths[1]]; 
+    let mn02 = vec![node_paths[0], node_paths[2]]; 
     std::thread::spawn(move || {
+        // RepCXL instance 1: uses nodes 1 and 2
+        let mut repcxl_a = single_rcxl(0, mn01);
+        repcxl_a.register_process(1);
+        repcxl_a.init_state();
         repcxl_a.sync_start();
         let obj_a = repcxl_a.new_object(7).expect("failed to create object");
 
@@ -198,6 +200,9 @@ fn test_readdirty() {
     });
 
     std::thread::spawn(move || {
+        // RepCXL instance 2: uses nodes 0 and 2
+        let mut repcxl_b = single_rcxl(1, mn02);
+        repcxl_b.register_process(0);
         repcxl_b.sync_start();
 
         // wait for instance A to finish writing
@@ -212,9 +217,9 @@ fn test_readdirty() {
             matches!(read_val, ReadReturn::ReadDirty(_)),
             "Read should return ReadDirty due to incomplete node set"
         );
-        if let ReadReturn::ReadDirty(v) = read_val {
+        if let ReadReturn::ReadDirty(rdp) = read_val {
             assert_eq!(
-                v, val,
+                rdp.data, val,
                 "Read value should match written value despite being dirty"
             );
         }
@@ -236,7 +241,7 @@ fn test_states_single_write() {
 
     let mut rcxl = single_rcxl(0, vec![node_path]);
     rcxl.init_state();
-    rcxl.enable_file_log(log_path);
+    rcxl.enable_monster_statelog(log_path);
 
     let obj = rcxl.new_object(1).expect("failed to create object");
     
@@ -282,28 +287,34 @@ fn test_states_write_conflict() {
     let log_path0 = "/tmp/repcxl0.log";
     let log_path1 = "/tmp/repcxl1.log";
 
-    // init instance 1
-    let mut rcxl0 = single_rcxl(0, vec![node_path]);
-    rcxl0.register_process(1);
-    rcxl0.init_state();
-    rcxl0.enable_file_log(log_path0);
 
-    // init instance 2
-    let mut rcxl1 = single_rcxl(1, vec![node_path]);
-    rcxl1.register_process(0);
-    rcxl1.enable_file_log(log_path1);
 
+    
     // create object
 
     // conflicting writes from both instances
     std::thread::spawn(move || {
+    // init instance 1
+    let mut rcxl0 = single_rcxl(0, vec![node_path]);
+    rcxl0.register_process(1);
+    rcxl0.init_state();
+    rcxl0.enable_monster_statelog(log_path0);
+
         rcxl0.sync_start();
         let obj_coord = rcxl0.new_object(2).expect("failed to create object");
 
         let _ = rcxl0.write_object(&obj_coord, 88);
     });
 
+    // wait initialization
+    std::thread::sleep(Duration::from_millis(100));
+
     std::thread::spawn(move || {
+    // init instance 2
+    let mut rcxl1 = single_rcxl(1, vec![node_path]);
+    rcxl1.register_process(0);
+    rcxl1.enable_monster_statelog(log_path1);
+
         rcxl1.sync_start();
         let obj_replica = rcxl1.get_object(2).expect("failed to get object");
         let _ = rcxl1.write_object(&obj_replica, 99);
@@ -344,27 +355,31 @@ fn test_states_write_conflict_then_error() {
     let log_path0 = "/tmp/repcxl00.log";
     let log_path1 = "/tmp/repcxl11.log";
 
-    // init instance A (coordinator) with only the first memory node
-    let mut rcxl0 = single_rcxl(0, vec![node_paths[0]]);
-    rcxl0.register_process(1);
-    rcxl0.init_state();
-    rcxl0.enable_file_log(log_path0);
+    
 
-    // init instance B (replica) with both memory nodes
-    let mut rcxl1 = single_rcxl(1, node_paths.clone());
-    rcxl1.register_process(0);
-    rcxl1.enable_file_log(log_path1);
-
+    
 
     // conflicting writes from both instances
+    let np0 = vec![node_paths[0]]; 
     std::thread::spawn(move || {
+    // init instance A (coordinator) with only the first memory node
+        let mut rcxl0 = single_rcxl(0, np0);
+        rcxl0.register_process(1);
+        rcxl0.init_state();
+        rcxl0.enable_monster_statelog(log_path0);
         rcxl0.sync_start();
         let obj_coord = rcxl0.new_object(2).expect("failed to create object");
         let _ = rcxl0.write_object(&obj_coord, 88);
     });
 
-    
+    std::thread::sleep(Duration::from_millis(100)); // wait initialization and write
+    let np2 = vec![node_paths[0], node_paths[1]]; // instance B has both nodes but A only has the first one, simulating a crash during replication to the second node
     std::thread::spawn(move || {
+        // init instance B (replica) with both memory nodes
+        let mut rcxl1 = single_rcxl(1, np2);
+        rcxl1.register_process(0);
+        rcxl1.enable_monster_statelog(log_path1);
+
         rcxl1.sync_start();
     
         // sleep to make rcxl create the object but not too much to avoid missing

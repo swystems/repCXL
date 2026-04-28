@@ -8,15 +8,19 @@ pub const TEST_ALGORITHM: &str = "monster";
 pub const TEST_ROUND_TIME: u64 = 10_000_000; // 10 ms
 
 pub fn test_config(node_paths: Vec<&'static str>) -> RepCXLConfig {
+    let log_node = "/tmp/repcxl_test.log";
+
+    setup_tmpfs_file(log_node, TEST_MEMORY_SIZE); // 1 MiB log file
+
     RepCXLConfig {
         id: 0,
         mem_nodes: node_paths.into_iter().map(|s| s.to_string()).collect(),
         mem_size: TEST_MEMORY_SIZE,
-        chunk_size: TEST_CHUNK_SIZE,
         processes: vec![], 
         algorithm: TEST_ALGORITHM.to_string(),
         round_time: TEST_ROUND_TIME,
         pipeline: false, // no threads
+        log_node: log_node.to_string(),
         ..Default::default()
     }
 }
@@ -37,20 +41,6 @@ pub fn single_rcxl(id: usize, node_paths: Vec<&'static str>) -> RepCXL<u64> {
     config.processes = vec![id as u32];
     RepCXL::<u64>::new(config)
 }
-
-// pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
-//     let mut processes = Vec::new();
-//     for i in 0..num {
-//         let mut rcxl = single_rcxl(i, node_paths.clone());
-//         if i == 0 {
-//             rcxl.init_state(); // coordinator inits state
-//         }
-//         processes.push(rcxl);
-
-        
-//     }
-//     processes
-// }
 
 
 pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {

@@ -71,6 +71,7 @@ fn main() {
         },
         _ => println!("Usage: shmem_obj_test <role>\nrole: 'c'/'coordinator' or 'r'/'replica'"),
     }
-    
+
+    rcxl.info();
     rcxl.stop(); // stop protocol threads
 }

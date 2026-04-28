@@ -4,7 +4,7 @@ use log::{error, debug};
 
 use super::{AlgorithmThreadContext, AlgorithmCallContext};
 use crate::timer;
-use crate::request::{Wid, WriteRequest, ReadRequest, ReadReturn};
+use crate::request::{Wid, WriteRequest, ReadRequest, ReadReturn, ReadDirtyPayload};
 use crate::safe_memio::{ObjectMemoryEntry, mem_writeall, mem_readall, mem_readends, MemoryError};
 use crate::utils::ms_logger;
 
@@ -100,7 +100,7 @@ fn is_overtime(round_start: Instant, round_time: Duration) -> bool {
 
 pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
         actx: &mut super::AlgorithmCallContext, 
-        view: &crate::GroupView,
+        view: &crate::GroupView<T>,
         obj_info: &crate::ObjectInfo,
         data: T) -> Result<(), String> {
 
@@ -247,7 +247,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
 
 pub fn monster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmThreadContext, 
+    actx: AlgorithmThreadContext<T>, 
     req_queue: kanal::Receiver<WriteRequest<T>>) {
 
     // MONSTER loop vars
@@ -296,7 +296,7 @@ pub fn monster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
 
 pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
     actx: &mut super::AlgorithmCallContext,
-    view: &crate::GroupView,
+    view: &crate::GroupView<T>,
     obj_info: &crate::ObjectInfo,
     data: T,
 ) -> Result<(), String> {
@@ -482,7 +482,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
 }
 
 pub fn fmonster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmThreadContext,
+    actx: AlgorithmThreadContext<T>,
     req_queue: kanal::Receiver<WriteRequest<T>>,
 ) {
     let mut actx_call = actx.to_call_context("fmonster", MonsterStats::new());
@@ -534,7 +534,7 @@ pub fn fmonster_write_thread<T: Copy + PartialEq + std::fmt::Debug>(
 /// processing requests
 pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
     actx: &AlgorithmCallContext,
-    view: &crate::GroupView,
+    view: &crate::GroupView<T>,
     obj_info: &crate::ObjectInfo,
 ) -> Result<ReadReturn<T>, String> {
 
@@ -564,7 +564,11 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
                 else {
                     debug!("Dirty reads old-new");
                 }
-                ReadReturn::ReadDirty(latest.value)
+                ReadReturn::ReadDirty(ReadDirtyPayload {
+                    wid: latest.wid,
+                    obj_info: *obj_info,
+                    data: latest.value,
+                })
             };
             Ok(result)
         },
@@ -578,7 +582,7 @@ pub fn monster_read<T: Copy + PartialEq + std::fmt::Debug>(
 /// - pull read requests from queue (blocking) 
 /// - call monster_read and return result to client
 pub fn monster_read_thread<T: Copy + PartialEq + std::fmt::Debug>(
-    actx: AlgorithmThreadContext,
+    actx: AlgorithmThreadContext<T>,
     req_queue: kanal::Receiver<ReadRequest<T>>
 ) {
     

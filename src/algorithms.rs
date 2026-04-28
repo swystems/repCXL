@@ -9,8 +9,8 @@ pub mod best_effort;
 pub mod monster;
 
 #[derive(Clone)]
-pub(crate) struct AlgorithmThreadContext {
-    pub group_view: super::GroupView,
+pub(crate) struct AlgorithmThreadContext<T> {
+    pub group_view: super::GroupView<T>,
     pub start_instant: Instant,
     pub round_time: Duration,
     pub read_offset: Option<f64>,
@@ -19,7 +19,7 @@ pub(crate) struct AlgorithmThreadContext {
 }
 
 
-impl AlgorithmThreadContext {
+impl<T> AlgorithmThreadContext<T> {
     pub fn to_call_context(&self, algorithm: &str, stats: monster::MonsterStats) -> AlgorithmCallContext {
         AlgorithmCallContext {
             algorithm: algorithm.to_string(),
@@ -44,7 +44,7 @@ pub(crate) struct AlgorithmCallContext {
 
 pub fn write_thread<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: &String,
-    actx: AlgorithmThreadContext,
+    actx: AlgorithmThreadContext<T>,
     req_queue: kanal::Receiver<WriteRequest<T>>,
 ) {
     match algorithm.as_str() {
@@ -57,7 +57,7 @@ pub fn write_thread<T: Copy + PartialEq + std::fmt::Debug>(
 
 pub fn read_thread<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: &String,
-    actx: AlgorithmThreadContext,
+    actx: AlgorithmThreadContext<T>,
     req_queue: kanal::Receiver<ReadRequest<T>>,
 ) {
     match algorithm.as_str() {
@@ -71,7 +71,7 @@ pub fn read_thread<T: Copy + PartialEq + std::fmt::Debug>(
 
 pub fn read<T: Copy + PartialEq + std::fmt::Debug>(
     actx: &AlgorithmCallContext,
-    view: &GroupView,
+    view: &GroupView<T>,
     obj: &RepCXLObject<T>,
 ) -> Result<ReadReturn<T>, String> {
     match actx.algorithm.as_str() {
@@ -83,7 +83,7 @@ pub fn read<T: Copy + PartialEq + std::fmt::Debug>(
 
 pub fn write<T: Copy + PartialEq + std::fmt::Debug>(
     actx: &mut AlgorithmCallContext,
-    view: &GroupView,
+    view: &GroupView<T>,
     obj: &RepCXLObject<T>,
     data: T,
 ) -> Result<(), String> {

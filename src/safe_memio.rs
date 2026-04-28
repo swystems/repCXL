@@ -96,6 +96,7 @@ impl<T: Copy> ObjectMemoryEntry<T> {
         }
     }
 
+    
     fn as_ptr(&self) -> *const u8 {
         self as *const Self as *const u8
     }
@@ -187,7 +188,7 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
 }
 
 /// Read the value from all memory nodes for the given object
-pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
+pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
 
     let node = mem_nodes.choose(&mut rand::rng()).unwrap();  // Returns Option<&T>
 
@@ -206,7 +207,7 @@ pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
 
 /// Write the an ObjectMemoryEntry to all memory nodes at its given memory offset 
 /// Flush&fence to ensure visibility
-pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes: &Vec<MemoryNode>) -> Result<(), MemoryError> {
+pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes: &Vec<MemoryNode<T>>) -> Result<(), MemoryError> {
 
     // write data to all memory nodes
     for node in mem_nodes {
@@ -234,7 +235,7 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
     
 
 /// Read the value from all memory nodes for the given object
-pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
+pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
     let mut states = Vec::with_capacity(mem_nodes.len());
     for node in mem_nodes {
         let addr = node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
@@ -256,7 +257,7 @@ pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resul
 /// Read the value from the first and last memory nodes only, exploiting the
 /// fact that memory nodes are written to always in the same order. Used for
 /// scalability improvements
-pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
+pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
     
     let first_node = &mem_nodes[0];
     let last_node = &mem_nodes[mem_nodes.len() - 1];

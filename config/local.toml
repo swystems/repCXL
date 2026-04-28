@@ -4,10 +4,11 @@
 # Memory nodes. In the VM setup, memory regions of the CXL node from the host 
 # are exposed as PCI devices with inter-vm shared memory 
 mem_nodes = ["/dev/shm/repCXLnode0", "/dev/shm/repCXLnode1"]
+log_node = "/dev/shm/repCXLlog"
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
-chunk_size = 64
+
 
 # (required) unique identifier for the repCXL instance. Can be passed with -i
 id = 0 
