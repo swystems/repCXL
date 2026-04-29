@@ -4,10 +4,11 @@
 # Memory nodes. In the VM setup, memory regions of the CXL node from the host 
 # are exposed as PCI devices with inter-vm shared memory 
 mem_nodes = [
-"/dev/dax0.0",
 "/dev/dax0.1",
 "/dev/dax0.2",
-] 
+"/dev/dax0.3",
+]
+log_node = "/dev/dax0.0"
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
@@ -20,7 +21,7 @@ id = 0
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+processes = [0, 1]
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000

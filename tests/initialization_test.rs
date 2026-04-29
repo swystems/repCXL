@@ -3,8 +3,7 @@ use std::vec;
 use rep_cxl::RepCXL;
 
 mod test_utils;
-use test_utils::*;
-
+use test_utils::{single_rcxl, multi_rcxl, TEST_MEMORY_SIZE, setup_tmpfs_file, cleanup_tmpfs_file, test_config};
 
 
 #[test]

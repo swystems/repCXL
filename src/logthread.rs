@@ -54,17 +54,23 @@ pub fn run<T: Copy>(lrq_path: String, memory_nodes_paths: Vec<String>, mem_size:
         
             // read log entry from queue
             if let (Some(entry), pid) = lrq.get_next() {
-
-               if let Some(v) = check_dirty(&memory_nodes, &entry) {
+                log::debug!("logthread: Processing log queue for obj {} from pid {}", 
+                    entry.obj_info.id, pid);
+                if let Some(v) = check_dirty(&memory_nodes, &entry) {
                     for node in &memory_nodes {
                         // get log
                         let log = node.get_state().get_log();
                         // appnd to log
                         log.append(entry.wid, entry.obj_info, v);
                     }
+                    log::debug!("logthread: Appended dirty value to logs for obj {}", entry.obj_info.id);
+                } else {
+                    log::debug!("logthread: No dirty value found for obj {} - clearing entry", entry.obj_info.id);
+                }
 
-                    lrq.clear_entry(pid);
-               }
+                // In all cases clear the queue entry so waiting processes won't hang.
+                lrq.clear_entry(pid);
+                log::debug!("logthread: Cleared log queue entry");
             }
             else {
                 // sleep?

@@ -21,6 +21,7 @@ use shmem::{MemoryNode, SharedState};
 pub mod config;
 pub use config::RepCXLConfig;
 
+
 /// The current membership of the group. Stores both the
 /// processes and the memory nodes present in the system at a given time.
 #[derive(Clone)]
@@ -186,11 +187,6 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let stop_flag = Arc::new(AtomicBool::new(false));
         // open log queue 
         let lrq = LogRequestQueue::from_file(&config.log_node);
-        logthread::run::<T>(
-            config.log_node.clone(),
-            config.mem_nodes.clone(),
-            config.mem_size,
-            Arc::clone(&stop_flag));
 
         // init read and write request queues
         let (wtx, wrx) = kanal::unbounded();
@@ -247,11 +243,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             return;
         }
 
-        let state = SharedState::new(self.config.mem_size);
+        let state = Box::new(SharedState::new(self.config.mem_size));
 
         // Write the shared state to each memory node
         for node in &self.view.memory_nodes {
-            node.write_state(state);
+            node.write_state(state.as_ref());
         }
     }
 
@@ -259,15 +255,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         self.view.clone()
     }
 
-    fn read_state_from_any(&self) -> Result<SharedState<T>, &str> {
-        for node in &self.view.memory_nodes {
-            let state = node.read_state();
-            return Ok(state);
-        }
-        Err("Could not read state from any memory node!")
-    }
+    // fn read_state_from_any(&self) -> Result<Box<SharedState<T>>, &str> {
+    //     for node in &self.view.memory_nodes {
+    //         let state = node.read_state_boxed();
+    //         return Ok(state);
+    //     }
+    //     Err("Could not read state from any memory node!")
+    // }
 
-    // Get a mutable reference to the starting block from the master memory node
+    // Get a mutable reference to SharedState from the master memory node
     fn get_state_from_master(&self) -> Result<&mut SharedState<T>, &str> {
         if let Some(master) = self.view.get_master_node() {
             let state = master.get_state();
@@ -279,7 +275,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn dump_states(&mut self) {
         println!("#### state dump ####");
         for node in &self.view.memory_nodes {
-            let state = node.read_state();
+            let state = node.get_state();
             println!("Memory node {}:\n{:?}", node.id, state);
         }
     }
@@ -309,15 +305,16 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
 
         let size = std::mem::size_of::<ObjectMemoryEntry<T>>();
 
-        let mut state = self.read_state_from_any().unwrap();
+        let state = self.get_state_from_master().unwrap();
 
+        let oi = state.get_oi();
         // try to alloc object
-        match state.object_index.alloc_object(id, size) {
+        match oi.alloc_object(id, size) {
             Some(offset) => {
-                for node in &self.view.memory_nodes {
-                    // write state to every memory node
-                    node.write_state(state);
-                }
+                // for node in &self.view.memory_nodes {
+                //     // write state to every memory node
+                //     node.write_state(state.as_ref());
+                // }
 
                 // clone the request queues
                 let wtx = self.wreq_queue_tx.clone();
@@ -361,12 +358,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             return;
         }
 
-        let mut state = self.read_state_from_any().unwrap();
-        state.object_index.dealloc_object(id);
-
         // Update the shared state in each memory node
         for node in &mut self.view.memory_nodes {
-            node.write_state(state);
+            let state = node.get_state();
+            state.object_index.dealloc_object(id);
         }
     }
 
@@ -374,9 +369,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// and then in the shared state.
     pub fn get_object(&mut self, id: usize) -> Option<RepCXLObject<T>> {
 
-        let state = self.read_state_from_any().unwrap();
+        let state = self.get_state_from_master().unwrap();
+        let object_index = state.get_oi();
 
-        if let Some(oi) = state.object_index.lookup_object(id) {
+        if let Some(oi) = object_index.lookup_object(id) {
             let obj = RepCXLObject::new(
                 id,
                 oi.offset,
@@ -463,14 +459,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     /// - pipeline: whether to use the pipelined read/write threads. @TODO currently
     /// pipeline mode is still blocking, move to kanal::async_channel
     pub fn read_object(&mut self, obj: &RepCXLObject<T>) -> Result<ReadReturn<T>, String> {
-        // build alg context
-        // let actx = algorithms::AlgorithmCallContext {
-        //                 start_instant: self.start_instant,
-        //                 round_time: Duration::from_nanos(self.config.round_time),
-        //                 read_offset: self.config.read_offset,
-        //                 logger: self.logger_path.as_deref(),
-        //             };
-        
+
         // read is parametrized to pipeline mode config
         let read_once = || {
             if self.config.pipeline {
@@ -511,6 +500,15 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             info!("Starting non-pipelined write thread for algorithm {}", algorithm);
         }
 
+        // start a single log thread for the repCXL cluster. Necessary to safely 
+        // log read-dirty values 
+        if self.is_coordinator() {
+            logthread::run::<T>(
+                self.config.log_node.clone(),
+                self.config.mem_nodes.clone(),
+                self.config.mem_size,
+                Arc::clone(&self.stop_flag));
+        }
 
         // pipeline mode uses threads and requests queues
         if self.config.pipeline {

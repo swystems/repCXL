@@ -4,10 +4,11 @@
 # Memory nodes. In the VM setup, memory regions of the CXL node from the host 
 # are exposed as PCI devices with inter-vm shared memory 
 mem_nodes = [
-"/dev/dax0.0",
 "/dev/dax0.1",
 "/dev/dax0.2",
-] 
+"/dev/dax0.3",
+]
+log_node = "/dev/dax0.0"
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 

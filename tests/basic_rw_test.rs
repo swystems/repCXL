@@ -2,7 +2,7 @@ use std::time::Duration;
 use rep_cxl::request::ReadReturn;
 
 mod test_utils;
-use test_utils::*;
+use test_utils::{single_rcxl,TEST_MEMORY_SIZE,setup_tmpfs_file,cleanup_tmpfs_file};
 
 const ALGORITHM: &str = "async_best_effort";
 const ROUND_TIME: Duration = Duration::from_millis(10);
@@ -14,8 +14,6 @@ fn test_rw() {
     let val = 42;
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
-    
-    
     
     std::thread::spawn(move || {
 
@@ -29,7 +27,7 @@ fn test_rw() {
 
         repcxl0.start();
         // Perform write
-        let result = obj5.write(val);
+        let result = repcxl0.write_object(&obj5,val);
         assert!(result.is_ok(), "Write should succeed");
     });
     std::thread::sleep(Duration::from_millis(100)); // wait for write to propagate

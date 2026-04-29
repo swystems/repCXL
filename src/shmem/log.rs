@@ -2,7 +2,7 @@ use super::MAX_PROCESSES;
 use crate::request::Wid;
 use super::object_index::ObjectInfo;
 
-pub const LOG_SIZE: usize = 1024; // Size of the log queue
+pub const LOG_SIZE: usize = 1024; // Size of the log
 
 /// Log queue entry containing write identifier, object ID, and memory node ID
 #[repr(C)]

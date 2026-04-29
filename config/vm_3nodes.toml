@@ -8,10 +8,9 @@ mem_nodes = [
 "/sys/bus/pci/devices/0000:00:04.0/resource2",
 "/sys/bus/pci/devices/0000:00:05.0/resource2"
 ] 
-
+log_node = "another_memory_node"
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
-chunk_size = 64
 
 # (required) unique identifier for the repCXL instance. Can be passed with -i
 id = 0 

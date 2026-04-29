@@ -7,7 +7,7 @@ use std::time::Duration;
 use std::vec;
 
 mod test_utils;
-use test_utils::*;
+use test_utils::{single_rcxl,TEST_MEMORY_SIZE,TEST_ROUND_TIME,setup_tmpfs_file,cleanup_tmpfs_file};
 
 fn wait_for_rounds(rounds: u32) {
     std::thread::sleep(Duration::from_nanos(TEST_ROUND_TIME) * rounds);
@@ -41,15 +41,14 @@ fn test_rw_single_node() {
     let val = 42;
     setup_tmpfs_file(node_path, TEST_MEMORY_SIZE);
 
-    // coordinator creates object
-    // let (obj5_coordinator, obj5_replica) = start_two_nodes_and_create_object(vec![node_path]);
-
-    // println!("here");
-
     std::thread::spawn(move || {
         let mut coordinator = single_rcxl(0, vec![node_path]);
-        coordinator.sync_start();
+        coordinator.init_state(); // coordinator inits state
+
         let obj5 = coordinator.new_object(5).expect("failed to get obj with id 5");   
+
+        coordinator.sync_start();
+
         let read_val = coordinator.read_object(&obj5).expect("Read should succeed");
         assert!(
             matches!(read_val, ReadReturn::ReadSafe(_)),
@@ -63,41 +62,43 @@ fn test_rw_single_node() {
         assert!(result.is_ok(), "Write should succeed");
 
     });
-    // Read returns the initial value
     
+
+    let mut replica = single_rcxl(1, vec![node_path]);
+    
+    replica.sync_start();
+
     std::thread::sleep(Duration::from_millis(100)); // wait for write to propagate
+    let obj5 = replica.get_object(5).expect("failed to get obj with id 5");
+    let read_val = replica.read_object(&obj5).expect("Read should succeed");
+    assert!(
+        matches!(read_val, ReadReturn::ReadSafe(_)),
+        "Read should return ReadSafe (single node)"
+    );
+    if let ReadReturn::ReadSafe(v) = read_val {
+        assert_eq!(v, val, "Read value should match written value");
+        assert_ne!(v, 0, "Read value should not be default value");
+    }
 
-    std::thread::spawn(move || {
-        let mut replica = single_rcxl(1, vec![node_path]);
-        replica.sync_start();
-
-        // wait for coordinator to finish
-        std::thread::sleep(Duration::from_millis(100));
-        let obj5 = replica.get_object(5).expect("failed to get obj with id 5");
-        let read_val = replica.read_object(&obj5).expect("Read should succeed");
-
-        assert!(
-            matches!(read_val, ReadReturn::ReadSafe(_)),
-            "Read should return ReadSafe (single node)"
-        );
-        if let ReadReturn::ReadSafe(v) = read_val {
-            assert_eq!(v, val, "Read value should match written value");
-            assert_ne!(v, 0, "Read value should not be default value");
-        }
-
-    });
 
     cleanup_tmpfs_file(node_path);
 }
 
 #[test]
 fn test_readsafe_multi_node() {
+    simple_logger::SimpleLogger::new()
+        .env()
+        .without_timestamps()
+        .init()
+        .unwrap();
+    
     let node_path1 = "/dev/shm/repCXL_test_rw1";
     let node_path2 = "/dev/shm/repCXL_test_rw2";
     let val = 123213;
 
     setup_tmpfs_file(node_path1, TEST_MEMORY_SIZE);
     setup_tmpfs_file(node_path2, TEST_MEMORY_SIZE);
+
 
     // let mut repcxls = multi_rcxl(2, vec![node_path1, node_path2]);
     
@@ -107,9 +108,10 @@ fn test_readsafe_multi_node() {
 
     std::thread::spawn(move || {
         let mut coordinator = single_rcxl(0, vec![node_path1, node_path2]);
-
-        coordinator.sync_start();
+        coordinator.init_state(); // coordinator inits state
+        coordinator.register_process(1);
         let obj5 = coordinator.new_object(5).expect("failed to get obj with id 5");   
+        coordinator.sync_start();
         let read_val = coordinator.read_object(&obj5).expect("Read should succeed");
         assert!(
             matches!(read_val, ReadReturn::ReadSafe(_)),
@@ -122,34 +124,42 @@ fn test_readsafe_multi_node() {
         let result = coordinator.write_object(&obj5, val);
         assert!(result.is_ok(), "Write should succeed");
 
-    });
-    // Read returns the initial value
-    
-    std::thread::sleep(Duration::from_millis(100)); // wait for write to propagate
+        // let read_val = coordinator.read_object(&obj5).expect("Read should succeed");
+        // assert!(
+        //     matches!(read_val, ReadReturn::ReadSafe(_)),
+        //     "Read should return ReadSafe (single node)"
+        // );
+        // if let ReadReturn::ReadSafe(v) = read_val {
+        //     assert_eq!(v, val, "Initial value should be default (0)");
+        // }    
 
+    });
+    
+    std::thread::sleep(Duration::from_millis(100)); // wait for init
 
     // let mut replica = repcxls.remove(0);
-    std::thread::spawn(move || {
-        let mut replica = single_rcxl(1, vec![node_path1, node_path2]);
+    let mut replica = single_rcxl(1, vec![node_path1, node_path2]);
+    replica.register_process(0);
 
-        replica.sync_start();
+    // handle.join().expect("Coordinator thread paniked");
+    replica.sync_start();
 
 
-        // wait for coordinator to finish
-        std::thread::sleep(Duration::from_millis(100));
-        let obj5 = replica.get_object(5).expect("failed to get obj with id 5");
-        let read_val = replica.read_object(&obj5).expect("Read should succeed");
+    std::thread::sleep(Duration::from_millis(100)); // wait for write to propagate
 
-        assert!(
-            matches!(read_val, ReadReturn::ReadSafe(_)),
-            "Read should return ReadSafe (single node)"
-        );
-        if let ReadReturn::ReadSafe(v) = read_val {
-            assert_eq!(v, val, "Read value should match written value");
-            assert_ne!(v, 0, "Read value should not be default value");
-        }
+    let obj5 = replica.get_object(5).expect("failed to get obj with id 5");
+    println!("Got object with id 5 {:?}", obj5);
+    let read_val = replica.read_object(&obj5).expect("Read should succeed");
 
-    });
+    assert!(
+        matches!(read_val, ReadReturn::ReadSafe(_)),
+        "Read should return ReadSafe (single node)"
+    );
+    if let ReadReturn::ReadSafe(v) = read_val {
+        assert_eq!(v, val, "Read value should match written value");
+        assert_ne!(v, 0, "Read value should not be default value");
+    }
+
 
     cleanup_tmpfs_file(node_path1);
     cleanup_tmpfs_file(node_path2);
@@ -171,10 +181,6 @@ fn test_readdirty() {
     for path in &node_paths {
         setup_tmpfs_file(path, TEST_MEMORY_SIZE);
     }
-    
-
-    
-
 
     // a hacky way to simulate a write conflict using instances with different node sets.
     // the current implementation, instance 2 reads the state from the first node only
@@ -188,10 +194,10 @@ fn test_readdirty() {
     std::thread::spawn(move || {
         // RepCXL instance 1: uses nodes 1 and 2
         let mut repcxl_a = single_rcxl(0, mn01);
-        repcxl_a.register_process(1);
         repcxl_a.init_state();
-        repcxl_a.sync_start();
+        repcxl_a.register_process(1);    
         let obj_a = repcxl_a.new_object(7).expect("failed to create object");
+        repcxl_a.sync_start();
 
         // Write from instance A (replicates to nodes 1 and 2)
         let result = repcxl_a.write_object(&obj_a, val);
@@ -199,31 +205,31 @@ fn test_readdirty() {
      
     });
 
-    std::thread::spawn(move || {
-        // RepCXL instance 2: uses nodes 0 and 2
-        let mut repcxl_b = single_rcxl(1, mn02);
-        repcxl_b.register_process(0);
-        repcxl_b.sync_start();
+    std::thread::sleep(Duration::from_millis(100)); // wait for init
 
-        // wait for instance A to finish writing
-        std::thread::sleep(Duration::from_millis(100));
+    // RepCXL instance 2: uses nodes 0 and 2
+    let mut repcxl_b = single_rcxl(1, mn02);
+    repcxl_b.register_process(0);
+    repcxl_b.sync_start();
 
-        let obj_b = repcxl_b.get_object(7).expect("failed to get object");
-        let read_val = repcxl_b.read_object(&obj_b).expect("Read should succeed");
-        // Read from instance B (has node 2 but not node 1)
-        // Should return ReadDirty because instance B's view is incomplete
+    // wait for instance A to finish writing
+    std::thread::sleep(Duration::from_millis(100));
 
-        assert!(
-            matches!(read_val, ReadReturn::ReadDirty(_)),
-            "Read should return ReadDirty due to incomplete node set"
+    let obj_b = repcxl_b.get_object(7).unwrap();
+    let read_val = repcxl_b.read_object(&obj_b).expect("Read should succeed");
+    
+    // Read from instance B (has node 2 but not node 1)
+    // Should return ReadDirty because instance B's view is incomplete
+    assert!(
+        matches!(read_val, ReadReturn::ReadDirty(_)),
+        "Read should return ReadDirty due to incomplete node set"
+    );
+    if let ReadReturn::ReadDirty(rdp) = read_val {
+        assert_eq!(
+            rdp.data, val,
+            "Read value should match written value despite being dirty"
         );
-        if let ReadReturn::ReadDirty(rdp) = read_val {
-            assert_eq!(
-                rdp.data, val,
-                "Read value should match written value despite being dirty"
-            );
-        }
-    });    
+    }
 
     for path in &node_paths {
         cleanup_tmpfs_file(path);
@@ -286,19 +292,14 @@ fn test_states_write_conflict() {
 
     let log_path0 = "/tmp/repcxl0.log";
     let log_path1 = "/tmp/repcxl1.log";
-
-
-
     
-    // create object
-
     // conflicting writes from both instances
     std::thread::spawn(move || {
-    // init instance 1
-    let mut rcxl0 = single_rcxl(0, vec![node_path]);
-    rcxl0.register_process(1);
-    rcxl0.init_state();
-    rcxl0.enable_monster_statelog(log_path0);
+        // init instance 1
+        let mut rcxl0 = single_rcxl(0, vec![node_path]);
+        rcxl0.init_state();
+        rcxl0.register_process(1);
+        rcxl0.enable_monster_statelog(log_path0);
 
         rcxl0.sync_start();
         let obj_coord = rcxl0.new_object(2).expect("failed to create object");
@@ -309,30 +310,28 @@ fn test_states_write_conflict() {
     // wait initialization
     std::thread::sleep(Duration::from_millis(100));
 
-    std::thread::spawn(move || {
     // init instance 2
     let mut rcxl1 = single_rcxl(1, vec![node_path]);
     rcxl1.register_process(0);
     rcxl1.enable_monster_statelog(log_path1);
 
-        rcxl1.sync_start();
-        let obj_replica = rcxl1.get_object(2).expect("failed to get object");
-        let _ = rcxl1.write_object(&obj_replica, 99);
-        let replica_states = ms_logger::MonsterStateLogger::new(log_path1).read_monster_states();
-        // println!("{:?}", replica_states);
-        let correct_transition = check_state_transitions(
-            &replica_states,
-            &["Try", "Check", "Wait", "PostConflictCheck"],
-        );
-        assert!(
-            correct_transition,
-            "Incorrect transition sequence in {}",
-            replica_states.join(" -> ")
-        );
-        let incorrect_transition =
-            check_state_transitions(&replica_states, &["Try", "Check", "Replicate", "Try"]);
-        assert!(!incorrect_transition, "Should not Check -> Replicate");
-    });
+    rcxl1.sync_start();
+    let obj_replica = rcxl1.get_object(2).expect("failed to get object");
+    let _ = rcxl1.write_object(&obj_replica, 99);
+    let replica_states = ms_logger::MonsterStateLogger::new(log_path1).read_monster_states();
+    // println!("{:?}", replica_states);
+    let correct_transition = check_state_transitions(
+        &replica_states,
+        &["Try", "Check", "Wait", "PostConflictCheck"],
+    );
+    assert!(
+        correct_transition,
+        "Incorrect transition sequence in {}",
+        replica_states.join(" -> ")
+    );
+    let incorrect_transition =
+        check_state_transitions(&replica_states, &["Try", "Check", "Replicate", "Try"]);
+    assert!(!incorrect_transition, "Should not Check -> Replicate");
 
     cleanup_tmpfs_file(node_path);
 
@@ -356,16 +355,13 @@ fn test_states_write_conflict_then_error() {
     let log_path1 = "/tmp/repcxl11.log";
 
     
-
-    
-
     // conflicting writes from both instances
     let np0 = vec![node_paths[0]]; 
     std::thread::spawn(move || {
     // init instance A (coordinator) with only the first memory node
         let mut rcxl0 = single_rcxl(0, np0);
-        rcxl0.register_process(1);
         rcxl0.init_state();
+        rcxl0.register_process(1);
         rcxl0.enable_monster_statelog(log_path0);
         rcxl0.sync_start();
         let obj_coord = rcxl0.new_object(2).expect("failed to create object");
@@ -374,56 +370,55 @@ fn test_states_write_conflict_then_error() {
 
     std::thread::sleep(Duration::from_millis(100)); // wait initialization and write
     let np2 = vec![node_paths[0], node_paths[1]]; // instance B has both nodes but A only has the first one, simulating a crash during replication to the second node
-    std::thread::spawn(move || {
-        // init instance B (replica) with both memory nodes
-        let mut rcxl1 = single_rcxl(1, np2);
-        rcxl1.register_process(0);
-        rcxl1.enable_monster_statelog(log_path1);
+    // init instance B (replica) with both memory nodes
+    let mut rcxl1 = single_rcxl(1, np2);
+    rcxl1.register_process(0);
+    rcxl1.enable_monster_statelog(log_path1);
 
-        rcxl1.sync_start();
-    
-        // sleep to make rcxl create the object but not too much to avoid missing
-        // the conflict
-        std::thread::sleep(Duration::from_nanos(TEST_ROUND_TIME/10)); 
-        // create object (replica finds it in the memory first node)
-        let obj_replica = rcxl1.get_object(2).expect("failed to get object");
+    rcxl1.sync_start();
 
-        let _ = rcxl1.write_object(&obj_replica, 99);
+    // sleep to make rcxl create the object but not too much to avoid missing
+    // the conflict
+    std::thread::sleep(Duration::from_nanos(TEST_ROUND_TIME/10)); 
+    // create object (replica finds it in the memory first node)
+    let obj_replica = rcxl1.get_object(2).expect("failed to get object");
 
-        let replica_states = ms_logger::MonsterStateLogger::new(log_path1).read_monster_states();
-        // println!("{:?}", replica_states);
-        let correct_transition = check_state_transitions(
-            &replica_states,
-            &["Try", "Check", "Wait", "PostConflictCheck", "Retry"],
-        );
-        assert!(
-            correct_transition,
-            "Incorrect transition sequence in {}",
-            replica_states.join(" -> ")
-        );
-        let incorrect_transition =
-            check_state_transitions(&replica_states, &["Try", "Check", "Replicate", "Try"]);
-        assert!(
-            !incorrect_transition,
-            "Incorrect transition should not occur {}",
-            replica_states.join(" -> ")
-        );
+    let _ = rcxl1.write_object(&obj_replica, 99);
 
-        // should read the value writte by the replica
-        let read_val = rcxl1.read_object(&obj_replica).expect("Read should succeed");
-        assert!(
-            matches!(read_val, ReadReturn::ReadSafe(_)),
-            "Read should return ReadSafe after retrying"
+    let replica_states = ms_logger::MonsterStateLogger::new(log_path1).read_monster_states();
+    // println!("{:?}", replica_states);
+    let correct_transition = check_state_transitions(
+        &replica_states,
+        &["Try", "Check", "Wait", "PostConflictCheck", "Retry"],
+    );
+    assert!(
+        correct_transition,
+        "Incorrect transition sequence in {}",
+        replica_states.join(" -> ")
+    );
+    let incorrect_transition =
+        check_state_transitions(&replica_states, &["Try", "Check", "Replicate", "Try"]);
+    assert!(
+        !incorrect_transition,
+        "Incorrect transition should not occur {}",
+        replica_states.join(" -> ")
+    );
+
+    // should read the value writte by the replica
+    let read_val = rcxl1.read_object(&obj_replica).expect("Read should succeed");
+    assert!(
+        matches!(read_val, ReadReturn::ReadSafe(_)),
+        "Read should return ReadSafe after retrying"
+    );
+    if let ReadReturn::ReadSafe(v) = read_val {
+        assert_eq!(
+            v, 99,
+            "Read value should match the value written by the replica after retrying"
         );
-        if let ReadReturn::ReadSafe(v) = read_val {
-            assert_eq!(
-                v, 99,
-                "Read value should match the value written by the replica after retrying"
-            );
-        }
-    });
+    }
 
     for path in &node_paths {
         cleanup_tmpfs_file(path);
     }
+
 }

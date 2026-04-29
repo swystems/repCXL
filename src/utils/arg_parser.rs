@@ -108,7 +108,7 @@ impl ArgParser {
             .arg(
                 Arg::new("log_node")
                     .short('l')
-                    .long("log-path")
+                    .long("log-node")
                     .help("Path used for log node output")
                     .value_parser(value_parser!(String)),
             );

@@ -36,7 +36,7 @@ pub fn mmap_daxdev(path: &str, size: usize) -> *mut u8 {
             panic!("Size must be at least 2 MiB for DAX mapping");
         }
 
-        let page_aligned_size = (size / page) * page;
+        let page_aligned_size = (size / page) * page + page;
 
         let ptr = unsafe {
             mmap(
@@ -61,7 +61,7 @@ pub fn mmap_daxdev(path: &str, size: usize) -> *mut u8 {
         ptr as *mut u8
 } 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub(crate) struct SharedState<T> {
     pub(crate) object_index: ObjectIndex,
     starting_block: StartingBlock,
@@ -79,6 +79,10 @@ impl<T: Copy> SharedState<T> {
             fwcc: FastWCC::new(),
             log: Log::new(),
         }
+    }
+
+    pub(crate) fn get_oi(&mut self) -> &mut ObjectIndex {
+        &mut self.object_index
     }
 
     pub(crate) fn get_starting_block(&mut self) -> &mut StartingBlock {
@@ -137,11 +141,12 @@ impl<T> MemoryNode<T> {
 
         // ensure the object area starts at a 64B aligned address after the state
         let offset_64aligned = std::mem::size_of::<SharedState<T>>() / 64 * 64 + 64; 
-        
+        let obj_addr = unsafe { ptr.offset(offset_64aligned as isize) };
+
         MemoryNode {
             id,
             state_addr: ptr as *mut SharedState<T>,
-            obj_addr: unsafe { ptr.offset(offset_64aligned as isize) },
+            obj_addr,
             size,
         }
     }
@@ -153,19 +158,27 @@ impl<T> MemoryNode<T> {
         unsafe { self.obj_addr.offset(offset as isize) }
     }
 
-    // copy of the shared state (which remains unchanged)
-    pub(crate) fn read_state(&self) -> SharedState<T> {
-        unsafe { std::ptr::read(self.state_addr) } // WARNING: might want to read_unaligned
-    }
+    // Heap-allocated copy of the shared state to avoid large stack allocations.
+    // pub(crate) fn read_state_boxed(&self) -> Box<SharedState<T>> {
+    //     let mut state = Box::new(std::mem::MaybeUninit::<SharedState<T>>::uninit());
+    //     unsafe {
+    //         std::ptr::copy_nonoverlapping(
+    //             self.state_addr,
+    //             state.as_mut_ptr() as *mut SharedState<T>,
+    //             1,
+    //         );
+    //         state.assume_init()
+    //     }
+    // }
 
     // mutable reference to the shared state
     pub(crate) fn get_state(&self) -> &mut SharedState<T>    {
         unsafe { &mut *self.state_addr }
     }
 
-    pub(crate) fn write_state(&self, state: SharedState<T>) {
+    pub(crate) fn write_state(&self, state: &SharedState<T>) {
         unsafe {
-            std::ptr::write(self.state_addr, state); // WARNING: might want to write_unaligned
+            std::ptr::copy_nonoverlapping(state as *const SharedState<T>, self.state_addr, 1);
         }
     }
 }
@@ -173,7 +186,7 @@ impl<T> MemoryNode<T> {
 impl<T> Drop for MemoryNode<T> {
     fn drop(&mut self) {
         unsafe {
-            munmap(self.obj_addr as *mut libc::c_void, self.size);
+            munmap(self.state_addr as *mut libc::c_void, self.size);
         }
         // File is automatically closed when it goes out of scope
     }
