@@ -2,6 +2,8 @@
   hosts: vms
   gather_facts: no
   tasks: 
+    - set_fact:
+        repcxl_id: "{{ inventory_hostname | regex_replace('^p','') | int }}"
 
     - name: generate repCXL config file from template locally
       delegate_to: localhost
@@ -22,6 +24,7 @@
           - "--exclude=test/"
           - "--exclude=ansible/"
           - "--exclude=ycsb/"
+      throttle: 8
 
     - name: build repCXL client
       shell: |
@@ -30,6 +33,7 @@
       args: 
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
+      throttle: 8
 
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client coordinator
@@ -56,6 +60,7 @@
         chdir: "{{ remote_dir }}"
       become: true
       when: repcxl_coordinator_id != repcxl_id
+      throttle: 8
       
 
     - name: ensure local output directory exists

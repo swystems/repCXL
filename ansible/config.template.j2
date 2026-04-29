@@ -21,7 +21,7 @@ id = {{ repcxl_id }}
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = {{ process_list }}
+processes = {{ process_list | to_json }}
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000

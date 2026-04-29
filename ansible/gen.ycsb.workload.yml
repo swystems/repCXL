@@ -1,7 +1,11 @@
 - name: Run YCSB cliient benchmark
   hosts: vms
+  serial: 4
   gather_facts: no
   tasks:
+
+    - set_fact:
+        repcxl_id: "{{ inventory_hostname | regex_replace('^p','') | int }}"
 
     - name: create remote work directory if it doesn't exist
       file:

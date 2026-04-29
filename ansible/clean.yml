@@ -2,6 +2,9 @@
 - name: Deploy repCXL from GitHub
   hosts: vms
   tasks:
+    - set_fact:
+        repcxl_id: "{{ inventory_hostname | regex_replace('^p','') | int }}"
+        
     - name: clean up the remote directory
       file:
         path: "{{ remote_dir }}"

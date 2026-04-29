@@ -2,6 +2,8 @@
 - name: Deploy local repCXL repo
   hosts: vms
   tasks:
+    - set_fact:
+        repcxl_id: "{{ inventory_hostname | regex_replace('^p','') | int }}"
 
     - name: generate repCXL config file from template locally
       delegate_to: localhost
