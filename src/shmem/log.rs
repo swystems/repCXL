@@ -53,6 +53,7 @@ impl LogRequestQueue {
         // wait until the log thread processes the entry and clears it
         while unsafe { (*self.entries)[pid].is_some() } {
             std::thread::yield_now(); // Yield to allow log thread to process the entry
+            // std::hint::spin_loop();
         }
     }
 

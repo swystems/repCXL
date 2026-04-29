@@ -27,16 +27,16 @@ processes = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 startup_delay = 1000000000
 
 # (ns) Duration of the synchronous round (in nanoseconds)
-round_time = 10 
+round_time = 20000 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "fmonster"
+algorithm = "async_best_effort"
 
 # Enable pipelined write path (true/false)
 pipeline = false
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 1
+read_retries = 100
 
 # CPU core to pin the repCXL write thread to (optional, default is None)
 # core_affinity = 2 
