@@ -131,6 +131,7 @@ fn main() {
 
     // metrics
     let mut read_latencies = Vec::new();
+    let mut dirty_read_latencies = Vec::new();
     let mut read_errors = 0;
     let mut write_latencies = Vec::new();
     let mut write_errors = 0;
@@ -165,7 +166,7 @@ fn main() {
                         match rr {
                             ReadReturn::ReadDirty(_) => {
                                 dirty_reads += 1;
-                            
+                                dirty_read_latencies.push(start.elapsed());
                                 // rcxl.write_object(obj, rdp.data).expect("Failed to write back dirty read value");
                             }
                             ReadReturn::ReadSafe(_) => safe_reads += 1,
@@ -215,6 +216,10 @@ fn main() {
     println!("  Write errors: {}", write_errors);
     println!("  Safe reads: {}", safe_reads);
     println!("  Dirty reads: {}", dirty_reads);
+    if dirty_reads > 0 {
+        let avg_dr_ns = dirty_read_latencies.iter().sum::<Duration>().as_nanos() as u64 / dirty_read_latencies.len() as u64;
+        println!("  Dirty read avg latency: {}", utils::fmt_ns(avg_dr_ns));
+    }
     if !read_latencies.is_empty() {
         println!("  Read latencies");
         utils::print_latency_stats(&read_latencies);

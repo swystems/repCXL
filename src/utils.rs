@@ -19,7 +19,7 @@ fn downsample(lat_sorted: &Vec<u64>, samples: usize) -> Vec<u64> {
 }
 
 /// Format nanoseconds into the most human-readable unit.
-fn fmt_ns(ns: u64) -> String {
+pub fn fmt_ns(ns: u64) -> String {
     if ns >= 1_000_000_000 {
         format!("{:.2}s", ns as f64 / 1_000_000_000.0)
     } else if ns >= 1_000_000 {

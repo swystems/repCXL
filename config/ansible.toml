@@ -21,13 +21,13 @@ id = 0
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = [0, 1]
+processes = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
 
 # (ns) Duration of the synchronous round (in nanoseconds)
-round_time = 1600 
+round_time = 10 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "fmonster"

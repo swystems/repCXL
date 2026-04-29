@@ -74,7 +74,7 @@ pub fn run<T: Copy>(lrq_path: String, memory_nodes_paths: Vec<String>, mem_size:
             }
             else {
                 // sleep?
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                // std::thread::sleep(std::time::Duration::from_micros(50));
             }
         }
     });

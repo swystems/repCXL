@@ -23,6 +23,7 @@ for file in "$@"; do
     dirty=$(grep "Dirty reads" "$file" | awk '{print $NF}')
     pct=$(awk "BEGIN {printf \"%.3f\", 100*$dirty/($safe+$dirty)}")
     echo "Dirty reads: $dirty / $(($safe + $dirty)) ($pct%)"
+    grep "Dirty read avg latency" "$file" || true
 
     # latency distribution vector
     read_vec=$(grep "vec100" "$file" | head -n 1) # read stats

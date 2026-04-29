@@ -31,7 +31,6 @@
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
 
-
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client coordinator
       shell: |
