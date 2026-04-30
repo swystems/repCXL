@@ -24,6 +24,7 @@
           - "--exclude=test/"
           - "--exclude=ansible/"
           - "--exclude=ycsb/"
+          - "--exclude=bench-outputs/"
 
     - name: build repCXL client
       shell: |
@@ -52,13 +53,10 @@
         mode: '0755'
 
     - name: fetch bench_out.dat from remote hosts
-      fetch:
-        src: "{{ remote_dir }}/bench_out{{ rid }}.dat"
-        dest: "{{ local_result_folder }}/p{{ rid }}.dat"
-        flat: yes
-      loop: "{{ range(0, repcxl_num_of_clients | int) | list }}"
-      loop_control:
-        loop_var: rid
+      synchronize:
+        mode: pull
+        src: "{{ remote_dir }}/bench_out*.dat"
+        dest: "{{ local_result_folder }}/"
       
     - name: aggregate remote outputs to single local file
       delegate_to: localhost
