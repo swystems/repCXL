@@ -1,0 +1,92 @@
+- name: Run YCSB cliient benchmark
+  hosts: vms
+  gather_facts: no
+  tasks: 
+    - set_fact:
+        repcxl_id: "{{ inventory_hostname | regex_replace('^p','') | int }}"
+
+    - name: generate repCXL config file from template locally
+      delegate_to: localhost
+      run_once: true
+      template:
+        src: config.template.j2
+        dest: "{{ local_repo }}/{{ repcxl_config }}"
+      when: repcxl_config == "config/ansible.toml"
+
+    - name: synchronize the content of this repo to remote hosts
+      synchronize:
+        src: "{{ local_repo }}"
+        dest: "{{ remote_dir }}"
+        rsync_opts:
+          - "--exclude=.git/"
+          - "--exclude=target/"
+          - "--exclude=jupyter/"
+          - "--exclude=test/"
+          - "--exclude=ansible/"
+          - "--exclude=ycsb/"
+
+    - name: build repCXL client
+      shell: |
+        source $HOME/.cargo/env
+        cargo build --release --bin ycsb_client
+      args: 
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+
+    # output stderr redirect to make ansible display the error message
+    - name: run repCXL client replica
+      shell: |
+        scripts/run_ycsb_client_mp.sh {{ repcxl_num_of_clients }} {{ ycsb_workload }} {{ repcxl_config }}
+      args:
+        executable: /bin/bash
+        chdir: "{{ remote_dir }}"
+      become: true
+      
+
+    - name: ensure local output directory exists
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: "{{ local_result_folder }}"
+        state: directory
+        mode: '0755'
+
+    - name: fetch bench_out.dat from remote hosts
+      fetch:
+        src: "{{ remote_dir }}/bench_out{{ rid }}.dat"
+        dest: "{{ local_result_folder }}/p{{ rid }}.dat"
+        flat: yes
+      loop: "{{ range(0, repcxl_num_of_clients | int) | list }}"
+      loop_control:
+        loop_var: rid
+      
+    - name: aggregate remote outputs to single local file
+      delegate_to: localhost
+      run_once: true
+      shell: |
+        ts=$(date +"%Y%m%d_%H%M")
+        output_file="{{ local_result_folder }}/bench_${ts}.txt"
+        latest_file="{{ local_result_folder }}/bench_latest.txt"
+
+        {
+          echo "Date: ${ts}"
+          echo "YCSB workload: {{ ycsb_workload }}"
+          echo ""
+          echo "============= RepCXL configuration ============="
+          grep "processes =" {{ repcxl_config }}
+          grep "algorithm =" {{ repcxl_config }}
+          grep "pipeline =" {{ repcxl_config }}
+          grep "round_time =" {{ repcxl_config }}
+          grep "read_retries =" {{ repcxl_config }}
+          grep "read_offset =" {{ repcxl_config }}
+          grep "core_affinity =" {{ repcxl_config }}
+          echo "============= Benchmark Results ============="
+          echo ""
+          {{local_repo}}/scripts/parse_bench.sh "{{ local_result_folder }}"*.dat
+        } > "${output_file}"
+
+        cp -f "${output_file}" "${latest_file}"
+      args:
+        executable: /bin/bash
+        chdir: "{{ local_repo }}"
+
