@@ -35,7 +35,7 @@
         chdir: "{{ remote_dir }}"
 
     # output stderr redirect to make ansible display the error message
-    - name: run repCXL client replica
+    - name: run repCXL client replicas
       shell: |
         scripts/run_ycsb_client_mp.sh {{ repcxl_num_of_clients }} {{ ycsb_workload }} {{ repcxl_config }}
       args:
