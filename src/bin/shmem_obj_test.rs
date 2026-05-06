@@ -48,9 +48,6 @@ fn main() {
 
             let obj100 = rcxl.new_object(100).expect("failed to create object");
             rcxl.write_object(&obj100, msg).expect("failed to write to object");
-            // obj100.write(*b"repcxl nocach1").expect("failed to write to object");
-            // obj100.write(*b"repcxl nocach2").expect("failed to write to object");
-            // obj100.write(*b"repcxl nocach3").expect("failed to write to object");
         },
         Some("r") | Some("replica") => {
             rcxl.start(); // start protocol threads

@@ -7,6 +7,7 @@ use crate::request::{WriteRequest,ReadRequest,ReadReturn};
 
 pub mod best_effort;
 pub mod monster;
+pub mod lock;
 
 #[derive(Clone)]
 pub(crate) struct AlgorithmThreadContext<T> {
@@ -77,6 +78,7 @@ pub fn read<T: Copy + PartialEq + std::fmt::Debug>(
     match actx.algorithm.as_str() {
         "async_best_effort" => best_effort::async_best_effort_read(&view, &obj.info),
         "monster" | "fmonster" => monster::monster_read(actx, view, &obj.info),
+        "lock" => lock::lock_read(view, &obj),
         _ => panic!("Unknown read algorithm, check config: {}", actx.algorithm),
     }
 }
@@ -91,6 +93,7 @@ pub fn write<T: Copy + PartialEq + std::fmt::Debug>(
         "async_best_effort" => best_effort::async_best_effort_write(view, &obj.info, data),
         "monster"  => monster::monster_write(actx, view, &obj.info, data),
         "fmonster" => monster::fmonster_write(actx, view, &obj.info, data),
+        "lock" => lock::lock_write(view, &obj, data),
         _ => Err(format!("write not supported for algorithm '{}'", actx.algorithm)),
     }
 }

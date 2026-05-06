@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub mod arg_parser;
 // pub mod mc_bench;
@@ -49,4 +50,89 @@ pub fn print_latency_stats(latencies: &Vec<Duration>) {
     P99:\t{}
     P99.99:\t{}
     P100:\t{}", fmt_ns(avg_ns), fmt_ns(p50), fmt_ns(p90), fmt_ns(p99), fmt_ns(p9999), fmt_ns(p100));
+}
+
+
+
+/// A compact read-write spinlock suitable for shared-memory use.
+///
+/// State encoding:
+/// - bit0: writer held
+/// - bits[1..]: reader count (each reader increments by 2)
+#[repr(C, align(64))]
+#[derive(Debug)]
+pub struct RWSpinlock {
+    state: AtomicUsize,
+}
+
+impl RWSpinlock {
+    pub const fn new() -> Self {
+        Self {
+            state: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn read_lock(&self) {
+        const WRITER_BIT: usize = 1;
+        const READER_INC: usize = 2;
+
+        loop {
+            let state = self.state.load(Ordering::Relaxed);
+            if (state & WRITER_BIT) != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+
+            // self.state = state checks whether a writer has acquired the lock since we read the state
+            if self.state.compare_exchange(
+                    state,
+                    state + READER_INC,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                ).is_ok()
+            {
+                return;
+            }
+
+            std::hint::spin_loop();
+        }
+    }
+
+    pub fn read_unlock(&self) {
+        const READER_INC: usize = 2;
+        self.state.fetch_sub(READER_INC, Ordering::Release);
+    }
+
+    pub fn write_lock(&self) {
+        const WRITER_BIT: usize = 1;
+        loop {
+            if self.state.compare_exchange(
+                    0, 
+                    WRITER_BIT, 
+                    Ordering::Acquire, 
+                    Ordering::Relaxed
+                ).is_ok()
+            {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
+    pub fn write_unlock(&self) {
+        self.state.store(0, Ordering::Release);
+    }
+}
+
+impl Default for RWSpinlock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// I know pls forgive my Trait sins
+impl Clone for RWSpinlock {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
 }

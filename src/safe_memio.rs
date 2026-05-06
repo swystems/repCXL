@@ -312,3 +312,17 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> R
     Ok([first, last])
 }
 
+pub fn mem_readone<T: Copy>(offset: usize, mem_node: &MemoryNode<T>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
+    let addr = mem_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    match safe_read(addr) {
+        Ok(data) => Ok(data),
+        Err(e) => {
+            error!(
+                "Safe read failed. Node {}, offset {}: {}",
+                mem_node.id, offset, e
+            );
+            Err(MemoryError(mem_node.id))
+        }
+    }
+}
+

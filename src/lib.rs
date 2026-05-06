@@ -76,25 +76,26 @@ impl<T> PartialEq for GroupView<T> {
 /// Shared replicated object across memory nodes
 #[derive(Debug)]
 pub struct RepCXLObject<T: Copy> {
+    info: ObjectInfo,
+    object_index_pos: usize, // position in SharedState's ObjectIndex
     wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
-    info: ObjectInfo,
 }
 
 impl<T: Copy> RepCXLObject<T> {
     const WRITE_TRACE_SAMPLE_RATE: u64 = 1024;
 
     pub fn new(
-        id: usize,
-        offset: usize,
-        size: usize,
+        info: ObjectInfo,
+        index: usize,
         wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
         rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
     ) -> Self {
         RepCXLObject {
+            info,
+            object_index_pos: index,
             wreq_queue_tx,
             rreq_queue_tx,
-            info: ObjectInfo::new(id, offset, size),
         }
     }
 
@@ -310,19 +311,18 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let oi = state.get_oi();
         // try to alloc object
         match oi.alloc_object(id, size) {
-            Some(offset) => {
-                // for node in &self.view.memory_nodes {
-                //     // write state to every memory node
-                //     node.write_state(state.as_ref());
-                // }
+            Some((index, oi)) => {
+                self.num_of_objects += 1;
 
                 // clone the request queues
                 let wtx = self.wreq_queue_tx.clone();
                 let rtx = self.rreq_queue_tx.clone();
                 // create the new RepCXLObject
-                let obj = RepCXLObject::new(id, offset, size, wtx, rtx);
+                let obj = RepCXLObject::new(oi, 
+                    index,
+                    wtx, 
+                    rtx);
 
-                self.num_of_objects += 1;
                 return Some(obj);
             }
             None => {
@@ -372,11 +372,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         let state = self.get_state_from_master().unwrap();
         let object_index = state.get_oi();
 
-        if let Some(oi) = object_index.lookup_object(id) {
+        if let Some((index, oi)) = object_index.lookup_object(id) {
             let obj = RepCXLObject::new(
-                id,
-                oi.offset,
-                oi.size,
+                oi,
+                index,
                 self.wreq_queue_tx.clone(),
                 self.rreq_queue_tx.clone(),
             );
