@@ -77,12 +77,6 @@ fn main() {
                 .value_parser(value_parser!(u64))
                 .help("Busy-hold time inside the lock critical section (ns)"),
         )
-        .arg(
-            Arg::new("init")
-                .long("init")
-                .action(clap::ArgAction::SetTrue)
-                .help("Reset shared region (ONLY run once, typically from id=0, before starting others)"),
-        )
         .get_matches();
 
     let path: &String = matches.get_one("path").unwrap();
@@ -91,7 +85,6 @@ fn main() {
     let mode: &String = matches.get_one("mode").unwrap();
     let iters: u64 = *matches.get_one("iters").unwrap();
     let hold_ns: u64 = *matches.get_one("hold_ns").unwrap();
-    let init: bool = *matches.get_one("init").unwrap();
 
     if id >= procs {
         panic!("--id must be in [0, procs) (id={}, procs={})", id, procs);
@@ -134,10 +127,8 @@ fn main() {
         panic!("mmap base not aligned for SharedData (base={:p}, align={})", shared, align);
     }
 
-    if init {
-        if id != 0 {
-            eprintln!("warning: --init used with id != 0 (id={})", id);
-        }
+    // process 0 resets the shared region
+    if id == 0 {
         // Do the reset before creating any shared references.
         unsafe { reset_shared_region(shared) };
         println!("initialized shared region at '{}' ({} bytes mapped)", path, mmap_len);
