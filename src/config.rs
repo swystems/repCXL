@@ -18,6 +18,7 @@ const DEFAULT_READ_RETRIES: usize = 0;
 const DEFAULT_CORE_AFFINITY: Option<usize> = None;
 const DEFAULT_READ_OFFSET: Option<f64> = None;
 const DEFAULT_LOG_NODE: &str = "";
+const DEFAULT_LOGGER_CLUSTER_SIZE: usize = 1;
 
 
 
@@ -92,6 +93,7 @@ pub struct RepCXLConfig {
     pub read_offset: Option<f64>,
     pub core_affinity: Option<usize>,
     pub log_node: String,
+    pub logger_cluster_size: usize,
 }
 
 impl Default for RepCXLConfig {
@@ -109,6 +111,7 @@ impl Default for RepCXLConfig {
             read_offset: DEFAULT_READ_OFFSET,
             core_affinity: DEFAULT_CORE_AFFINITY,
             log_node: DEFAULT_LOG_NODE.to_string(),
+            logger_cluster_size: DEFAULT_LOGGER_CLUSTER_SIZE,
         }
     }
 }
@@ -160,6 +163,16 @@ impl RepCXLConfig {
         // log node path must not be empty
         if self.log_node.is_empty() {
             return Err(format!("{} log_node must be specified in the config", err_prefix));
+        }
+
+        if self.logger_cluster_size == 0 {
+            return Err(format!("{} logger_cluster_size must be a positive odd integer", err_prefix));
+        }
+        if self.logger_cluster_size % 2 == 0 {
+            return Err(format!("{} logger_cluster_size must be odd (not even)", err_prefix));
+        }
+        if self.logger_cluster_size > self.processes.len() as usize {
+            return Err(format!("{} logger_cluster_size cannot be larger than the number of processes", err_prefix));
         }
 
         Ok(())

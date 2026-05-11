@@ -13,7 +13,7 @@ pub mod shmem;
 mod timer;
 pub mod utils;
 pub mod request;
-pub mod logthread;
+pub mod logger;
 use request::{WriteRequest, ReadRequest, ReadReturn};
 use shmem::object_index::ObjectInfo;
 use shmem::log::LogRequestQueue;
@@ -480,8 +480,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             }
         }
 
+        // submit a request to the logger queue and wait for it to be finished
+        // if no more retries left
         if let Ok(ReadReturn::ReadDirty(rdp)) = &res {
-            self.lrq.push_wait(rdp.wid, rdp.obj_info, self.view.self_id);
+            self.lrq.log_request(rdp.wid, rdp.obj_info, self.view.self_id);
         }
 
         res
@@ -499,14 +501,19 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             info!("Starting non-pipelined write thread for algorithm {}", algorithm);
         }
 
-        // start a single log thread for the repCXL cluster. Necessary to safely 
-        // log read-dirty values 
-        if self.is_coordinator() {
-            logthread::run::<T>(
-                self.config.log_node.clone(),
-                self.config.mem_nodes.clone(),
-                self.config.mem_size,
-                Arc::clone(&self.stop_flag));
+        // start a logger thread for the repCXL cluster. Necessary to safely 
+        // log read-dirty values for algorithms that require it. 
+        // The first <config.logger_cluster_size> processes spawn logger
+        // threads in order to form a fault-tolerant logger cluster. This 
+        // deployment strategy is uniquely to avoid spawning logger processes
+        // separately.
+        if algorithms::requires_logger(&algorithm) &&
+            self.view.self_id < self.config.logger_cluster_size {
+                logger::run::<T>(
+                    self.config.log_node.clone(),
+                    self.config.mem_nodes.clone(),
+                    self.config.mem_size,
+                    Arc::clone(&self.stop_flag));
         }
 
         // pipeline mode uses threads and requests queues

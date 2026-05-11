@@ -111,6 +111,12 @@ impl ArgParser {
                     .long("log-node")
                     .help("Path used for log node output")
                     .value_parser(value_parser!(String)),
+            )
+            .arg(
+                Arg::new("logger_cluster_size")
+                    .long("logger-cluster-size")
+                    .help("Size of the logger cluster (positive odd integer)")
+                    .value_parser(value_parser!(usize)),
             );
 
 
@@ -159,6 +165,9 @@ impl ArgParser {
         }
         if let Some(log_node) = matches.remove_one::<String>("log_node") {
             self.config.log_node = log_node;
+        }
+        if let Some(logger_cluster_size) = matches.remove_one::<usize>("logger_cluster_size") {
+            self.config.logger_cluster_size = logger_cluster_size;
         }
 
         // validate config values

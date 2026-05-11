@@ -1,7 +1,7 @@
-use crate::shmem::MemoryNode;
+use crate::shmem::{MemoryNode, log::LoggerState};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::safe_memio::{mem_readends, MemoryError};
-use crate::shmem::log::{LogRequestQueue, LogQueueEntry};
+use crate::shmem::log::{LogQueueEntry};
 
 /// Check if a log entry is still dirty and return the dirty value if it exists.
 /// This condition is evaluated when the value of log entry still exists some memory 
@@ -28,9 +28,8 @@ fn check_dirty<T: Copy>(memory_nodes: &Vec<MemoryNode<T>>, entry: &LogQueueEntry
 }
 
 /// Main loop that reads and processes log entries from the queue
-pub fn run<T: Copy>(lrq_path: String, memory_nodes_paths: Vec<String>, mem_size: usize, stop_flag: Arc<AtomicBool>) {
+pub fn run<T: Copy>(logger_path: String, memory_nodes_paths: Vec<String>, mem_size: usize, stop_flag: Arc<AtomicBool>) {
 
-    
     std::thread::spawn(move || {
 
         let mut memory_nodes = Vec::new();
@@ -43,7 +42,7 @@ pub fn run<T: Copy>(lrq_path: String, memory_nodes_paths: Vec<String>, mem_size:
         }
 
         // open log request queue
-        let mut lrq = LogRequestQueue::from_file(lrq_path.as_str());
+        let mut lstate = LoggerState::from_file(logger_path.as_str());
 
 
         loop {
@@ -51,9 +50,11 @@ pub fn run<T: Copy>(lrq_path: String, memory_nodes_paths: Vec<String>, mem_size:
             if stop_flag.load(Ordering::Relaxed) {
                 break;
             }
+
+            // check still the leader
         
             // read log entry from queue
-            if let (Some(entry), pid) = lrq.get_next() {
+            if let (Some(entry), pid) = lstate.poll_next_process_queue() {
                 log::debug!("logthread: Processing log queue for obj {} from pid {}", 
                     entry.obj_info.id, pid);
                 if let Some(v) = check_dirty(&memory_nodes, &entry) {
@@ -69,7 +70,7 @@ pub fn run<T: Copy>(lrq_path: String, memory_nodes_paths: Vec<String>, mem_size:
                 }
 
                 // In all cases clear the queue entry so waiting processes won't hang.
-                lrq.clear_entry(pid);
+                lstate.clear_process_queue(pid);
                 log::debug!("logthread: Cleared log queue entry");
             }
             else {

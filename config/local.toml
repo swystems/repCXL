@@ -19,6 +19,11 @@ id = 0
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
 processes = [0, 1, 2, 3]
 
+# Number of logger processes. If the value is N, N repCXL processes will spawn
+# _one_ logger process. The value must be odd (due to quorum-based replication)
+# and cannot be larger than the number of processes in the cluster. 
+logger_cluster_size = 3
+
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
 

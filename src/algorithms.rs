@@ -42,6 +42,16 @@ pub(crate) struct AlgorithmCallContext {
     pub stats: monster::MonsterStats,
 }
 
+/// Checks if <algorithm> requires logger cluster
+pub fn requires_logger(algorithm: &String) -> bool {
+    match algorithm.as_str() {
+        "async_best_effort" => true,
+        "monster" | "fmonster" => true,
+        "lock" => false,
+        _ => panic!("Unknown algorithm, check config: {}", algorithm),
+    }
+}
+
 
 pub fn write_thread<T: Copy + PartialEq + std::fmt::Debug>(
     algorithm: &String,
@@ -67,7 +77,6 @@ pub fn read_thread<T: Copy + PartialEq + std::fmt::Debug>(
         _ => panic!("Unknown read algorithm, check config: {}", algorithm),
     }
 }
-
 
 
 pub fn read<T: Copy + PartialEq + std::fmt::Debug>(
