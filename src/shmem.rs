@@ -21,7 +21,9 @@ use log::Log;
 pub const MAX_OBJECTS: usize = 1024; // Maximum number of objects
 pub const MAX_PROCESSES: usize = 512; // Maximum number of processes
 
-
+/// mmap a CXL DAX device, e.g., /dev/dax0.0. Given size is 
+/// page-aligned to the next 2 MiB. Also suitable to other memory-backed
+/// files e.g. tmpfs
 pub fn mmap_daxdev(path: &str, size: usize) -> *mut u8 {
     let file = OpenOptions::new()
             .read(true)

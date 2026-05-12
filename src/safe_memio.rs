@@ -8,7 +8,6 @@
 //!
 
 use rand::Rng;
-use rand::prelude::IndexedRandom;  // Enables choose() on slices
 use crate::request::Wid;
 use crate::shmem::MemoryNode;
 use crate::timer;
@@ -106,8 +105,9 @@ impl<T: Copy> ObjectMemoryEntry<T> {
 /// However, this function might return earlier than the write is visibe to 
 /// _other nodes_, it only ensures visibility across different processes in the same
 /// node. 
+#[allow(dead_code)]
 #[cfg(target_arch = "x86_64")]
-unsafe fn _nvwrite<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) {
+unsafe fn nvwrite<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) {
     let mut len_64pad = (size_of::<ObjectMemoryEntry<T>>() + 63) / 64 * 64; // 64B aligned size
     let mut src_ptr = data.as_ptr();
     let mut dest_ptr = addr as *mut u8;
@@ -130,24 +130,6 @@ unsafe fn _nvwrite<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryE
         len_64pad -= 64;
     }
 
-    // 2. Process remaining 8-byte chunks
-    // while len >= 8 {
-    //     let mut val: u64 = 0;
-    //     core::ptr::copy_nonoverlapping(src_ptr, &mut val as *mut u64 as *mut u8, 8);
-    //     _mm_stream_si64(dest_ptr as *mut i64, val as i64);
-        
-    //     src_ptr = src_ptr.add(8);
-    //     dest_ptr = dest_ptr.add(8);
-    //     len -= 8;
-    // }
-
-    // // 3. Handle any tiny remainder (1-7 bytes) 
-    // // Standard stores are okay here, or just pad to 8 bytes above.
-    // if len > 0 {
-    //     core::ptr::copy_nonoverlapping(src_ptr, dest_ptr, len);
-    // }
-
-    // 4. Final Fence to ensure CXL sees all writes
     _mm_sfence();
 }
 
@@ -165,9 +147,7 @@ pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEn
     
     // write to memory
     unsafe { std::ptr::write_volatile(addr, data); }
-
-
-    
+ 
     Ok(())
 }
 
@@ -187,23 +167,6 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
     Ok(unsafe { std::ptr::read_volatile(addr) })
 }
 
-/// Read the value from all memory nodes for the given object
-pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
-
-    let node = mem_nodes.choose(&mut rand::rng()).unwrap();  // Returns Option<&T>
-
-    let addr = node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    match safe_read(addr) {
-        Ok(ome) => return Ok(ome),
-        Err(e) => {
-            error!(
-                "Safe read failed. Node {}, offset {}: {}",
-                node.id, offset, e
-            );
-            return Err(MemoryError(node.id));
-        }
-    }
-}
 
 /// Write the an ObjectMemoryEntry to all memory nodes at its given memory offset 
 /// Flush&fence to ensure visibility

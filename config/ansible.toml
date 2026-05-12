@@ -30,7 +30,6 @@ log_node = "/dev/dax0.0"
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
-chunk_size = 64
 
 # (required) unique identifier for the repCXL instance. Can be passed with -i
 id = 0 
@@ -40,6 +39,11 @@ id = 0
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
 #   - An array ([0, 1, 2, 3]) → explicit list of IDs
 processes = "0-8"
+
+# Number of logger processes. If the value is N, N repCXL processes will spawn
+# _one_ logger process. The value must be odd (due to quorum-based replication)
+# and cannot be larger than the number of processes in the cluster. 
+logger_cluster_size = 3
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000

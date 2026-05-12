@@ -53,6 +53,15 @@ unsafe fn write_volatile_flush(addr: *mut u8, size: usize) {
 }
 
 #[inline(always)]
+unsafe fn write_flush(addr: *mut u8, size: usize) {
+    for off in 0..size {
+        let a = addr.add(off);
+        (*a) = 0xAB;
+    }
+    cache_flush_fence(addr, size);
+}
+
+#[inline(always)]
 unsafe fn write_plain(addr: *mut u8, size: usize) {
     for off in 0..size {
         std::ptr::write(addr.add(off), 0xAB);
@@ -97,6 +106,16 @@ unsafe fn read_flush_volatile(addr: *mut u8, size: usize) -> u8 {
     let mut v = 0u8;
     for off in 0..size {
         v = std::ptr::read_volatile(addr.add(off));
+    }
+    v
+}
+
+#[inline(always)]
+unsafe fn read_flush(addr: *mut u8, size: usize) -> u8 {
+    cache_flush_fence(addr, size);
+    let mut v = 0u8;
+    for off in 0..size {
+        v = *(addr.add(off));
     }
     v
 }
@@ -284,7 +303,7 @@ fn main() {
             let idx = counter.get();
             let offset = addresses[idx % addresses.len()];
             counter.set(idx + 1);
-            read_plain(base.add(offset), obj_size)
+            std::hint::black_box(read_plain(base.add(offset), obj_size))
         });
     }
     
@@ -294,7 +313,17 @@ fn main() {
             let idx = counter.get();
             let offset = addresses[idx % addresses.len()];
             counter.set(idx + 1);
-            read_volatile_only(base.add(offset), obj_size)
+            std::hint::black_box(read_volatile_only(base.add(offset), obj_size))
+        });
+    }
+
+    {
+        let counter = Cell::new(0usize);
+        bench("read + cflush", iterations, || unsafe {
+            let idx = counter.get();
+            let offset = addresses[idx % addresses.len()];
+            counter.set(idx + 1);
+            std::hint::black_box(read_flush(base.add(offset), obj_size))
         });
     }
     
@@ -304,7 +333,7 @@ fn main() {
             let idx = counter.get();
             let offset = addresses[idx % addresses.len()];
             counter.set(idx + 1);
-            read_flush_volatile(base.add(offset), obj_size)
+            std::hint::black_box(read_flush_volatile(base.add(offset), obj_size))
         });
     }
 
@@ -332,6 +361,17 @@ fn main() {
             let offset = addresses[idx % addresses.len()];
             counter.set(idx + 1);
             write_volatile_only(base.add(offset), obj_size);
+            0
+        });
+    }
+
+    {
+        let counter = Cell::new(0usize);
+        bench("write + cflush", iterations, || unsafe {
+            let idx = counter.get();
+            let offset = addresses[idx % addresses.len()];
+            counter.set(idx + 1);
+            write_flush(base.add(offset), obj_size);
             0
         });
     }

@@ -77,7 +77,7 @@ where
 /// Raw deserialized representation of the TOML config file.
 /// All fields are optional during deserialization  missing fields keep their 
 /// Can be checked with validate() 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct RepCXLConfig {
     pub mem_nodes: Vec<String>,

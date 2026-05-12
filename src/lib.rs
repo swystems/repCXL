@@ -16,10 +16,10 @@ pub mod request;
 pub mod logger;
 use request::{WriteRequest, ReadRequest, ReadReturn};
 use shmem::object_index::ObjectInfo;
-use shmem::log::LogRequestQueue;
 use shmem::{MemoryNode, SharedState};
 pub mod config;
 pub use config::RepCXLConfig;
+
 
 
 /// The current membership of the group. Stores both the
@@ -156,7 +156,7 @@ pub struct RepCXL<T> {
     pub config: RepCXLConfig,
     num_of_objects: usize,
     view: GroupView<T>,
-    lrq: LogRequestQueue,
+    logger_iface: logger::LoggerInterface,
     wreq_queue_tx: kanal::Sender<WriteRequest<T>>,
     wreq_queue_rx: Option<kanal::Receiver<WriteRequest<T>>>,
     rreq_queue_tx: kanal::Sender<ReadRequest<T>>,
@@ -186,8 +186,9 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         }
 
         let stop_flag = Arc::new(AtomicBool::new(false));
-        // open log queue 
-        let lrq = LogRequestQueue::from_file(&config.log_node);
+        
+        // create logger instance
+        let logger_iface = logger::LoggerInterface::new(&config);
 
         // init read and write request queues
         let (wtx, wrx) = kanal::unbounded();
@@ -206,7 +207,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             config,
             num_of_objects: 0,
             view,
-            lrq,
+            logger_iface,
             wreq_queue_tx: wtx,
             wreq_queue_rx: Some(wrx),
             rreq_queue_tx: rtx,
@@ -483,7 +484,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         // submit a request to the logger queue and wait for it to be finished
         // if no more retries left
         if let Ok(ReadReturn::ReadDirty(rdp)) = &res {
-            self.lrq.log_request(rdp.wid, rdp.obj_info, self.view.self_id);
+            self.logger_iface.log_request(rdp.wid, rdp.obj_info, self.view.self_id);
         }
 
         res
@@ -510,9 +511,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         if algorithms::requires_logger(&algorithm) &&
             self.view.self_id < self.config.logger_cluster_size {
                 logger::run::<T>(
-                    self.config.log_node.clone(),
-                    self.config.mem_nodes.clone(),
-                    self.config.mem_size,
+                    self.config.clone(),
                     Arc::clone(&self.stop_flag));
         }
 
