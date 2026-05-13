@@ -6,7 +6,7 @@ use crate::safe_memio;
 use crate::request::Wid;
 
 // whether to sleep in the follower loop to reduce CPU usage (at the cost of slower failure detection)
-const ELECTION_SLEEP: bool = false; 
+const ELECTION_SLEEP: bool = true; 
 
 /// Log queue entry containing write identifier, object ID, and memory node ID
 #[repr(C)]
@@ -209,7 +209,9 @@ impl LoggerInterface {
     }
 
 
-    /// Check if a new election is running and return the candidate's vote
+    /// Check if a a candidate started a new election and return its vote. In case
+    /// of multiple candidates, return the one with the higher term or, in case of 
+    /// tie, smaller candidate ID.
     fn check_new_election(&self) -> Option<ElectionVote> {
         let election_board = unsafe { &mut (*self.shmem).election_board };
 
@@ -221,13 +223,29 @@ impl LoggerInterface {
             );
         }
 
+        let mut best: Option<ElectionVote> = None;
         for i in 0..self.cluster_size {
-            if election_board[i].new_election {
-                return Some(election_board[i]);
-            } 
+            let vote = election_board[i];
+            if !vote.new_election {
+                continue;
+            }
+
+            best = match best {
+                None => Some(vote),
+                Some(current_best) => {
+                    if vote.term > current_best.term
+                        || (vote.term == current_best.term
+                            && vote.candidate_id < current_best.candidate_id)
+                    {
+                        Some(vote)
+                    } else {
+                        Some(current_best)
+                    }
+                }
+            };
         }
 
-        None
+        best
     }
 
     fn vote(&mut self, pid: usize, vote: ElectionVote, ) {
@@ -321,7 +339,7 @@ fn check_dirty<T: Copy>(memory_nodes: &Vec<MemoryNode<T>>, entry: &LogQueueEntry
 /// on the _next_ available index to avoid the old leader to overwrite the log entry
 /// We don't care about empty slots in the log, repcxl processes read the entire
 /// log when recovery and discard empty entries
-pub fn run<T: Copy>(config: RepCXLConfig, stop_flag: Arc<AtomicBool>) {
+pub fn run<T: Copy>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>) {
 
     std::thread::spawn(move || {
 
@@ -339,8 +357,8 @@ pub fn run<T: Copy>(config: RepCXLConfig, stop_flag: Arc<AtomicBool>) {
         // initial vote is always the default one (leader = pid0), no need to read
         let mut my_vote = ElectionVote::init();
 
-        let mut running_election = false;
-        let lid = config.id as usize; // logger id = repcxl id
+        let mut running_for_election = false;
+        // let lid = config.id as usize; // logger id = repcxl id
 
         loop {
             // stop with algorithms threads on rep_cxl.stop()
@@ -349,64 +367,68 @@ pub fn run<T: Copy>(config: RepCXLConfig, stop_flag: Arc<AtomicBool>) {
             }
 
             // LEADER logic
-            if lif.is_leader(lid) && !running_election {
+            if lif.is_leader(lid) {
                 
-               // read log entry from queue
-                if let (Some(entry), pid) = lif.poll_next_process_queue() {
-                    log::debug!("logthread: Processing log queue for obj {} from pid {}", 
-                        entry.obj_info.id, pid);
-                    if let Some(v) = check_dirty(&memory_nodes, &entry) {
-                        for node in &memory_nodes {
-                            // get log
-                            let log = node.get_state().get_log();
-                            // appnd to log
-                            log.append(entry.wid, entry.obj_info, v);
+                // p just became a leader
+                if running_for_election {
+                    log::debug!("[logger-election] {}: Election won, now leader for term {}", lid, my_vote.term);
+                    running_for_election = false;
+                    lif.uncandidate(lid);
+                } 
+                
+                // p is (and was) the current active leader
+                if !running_for_election {
+                // read log entry from queue
+                    if let (Some(entry), pid) = lif.poll_next_process_queue() {
+                        log::debug!("[logger-election]: Processing log queue for obj {} from pid {}", 
+                            entry.obj_info.id, pid);
+                        if let Some(v) = check_dirty(&memory_nodes, &entry) {
+                            for node in &memory_nodes {
+                                // get log
+                                let log = node.get_state().get_log();
+                                // appnd to log
+                                log.append(entry.wid, entry.obj_info, v);
+                            }
+                            log::debug!("[logger-election]: Appended dirty value to logs for obj {}", entry.obj_info.id);
+                        } else {
+                            log::debug!("[logger-election]: No dirty value found for obj {} - clearing entry", entry.obj_info.id);
                         }
-                        log::debug!("logthread: Appended dirty value to logs for obj {}", entry.obj_info.id);
-                    } else {
-                        log::debug!("logthread: No dirty value found for obj {} - clearing entry", entry.obj_info.id);
-                    }
 
-                    // In all cases clear the queue entry so waiting processes won't hang.
-                    lif.clear_process_queue(pid);
-                    log::debug!("logthread: Cleared log queue entry");
+                        // In all cases clear the queue entry so waiting processes won't hang.
+                        lif.clear_process_queue(pid);
+                        log::debug!("[logger-election]: Cleared log queue entry");
+                    }
+    
                 }
 
-                continue; // skip follower logic if leader
-                
-            }
+                continue; // skip follower logic if active leader                
 
-            if lif.is_leader(lid) && running_election {
-                log::debug!("logthread {}: Election won, now leader for term {}", lid, my_vote.term);
-                running_election = false;
-                lif.uncandidate(lid);
-                continue;
             }
-
             
             // FOLLOWER logic
             if let Some(candidate_vote) = lif.check_new_election() {
-                log::debug!("logthread {}: Detected election for candidate {}, term {}", lid, candidate_vote.candidate_id, candidate_vote.term);
                 
-                if candidate_vote.term > my_vote.term {
-                    my_vote = candidate_vote;
-                }
+                log::debug!("[logger-election] {}: Detected election for candidate {}, term {}", 
+                    lid, 
+                    candidate_vote.candidate_id, 
+                    candidate_vote.term
+                );
 
+                // note: could be self, check_new_election returns the best
+                // candidate to vote for in the whole election board
+                my_vote = candidate_vote;
                 lif.vote(lid, my_vote);
-                running_election = true;
+
             }
-            else if lif.has_been_nominated(lid) {
-                log::debug!("starting election for logger {} with term {}", lid, my_vote.term + 1);
+            if lif.has_been_nominated(lid) {
+                log::debug!("[logger-election] starting election for logger {} with term {}", lid, my_vote.term + 1);
                 // start election
                 my_vote.new_election = true;
                 // vote for self
                 my_vote.term += 1;
                 my_vote.candidate_id = lid;
                 lif.vote(lid, my_vote);
-                running_election = true;
-            }
-            else {
-                running_election = false;
+                running_for_election = true;
             }
     
             if ELECTION_SLEEP {

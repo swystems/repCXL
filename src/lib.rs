@@ -507,10 +507,11 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         // The first <config.logger_cluster_size> processes spawn logger
         // threads in order to form a fault-tolerant logger cluster. This 
         // deployment strategy is uniquely to avoid spawning logger processes
-        // separately.
+        // separately. RepCXL id = logger id (lid)
         if algorithms::requires_logger(&algorithm) &&
             self.view.self_id < self.config.logger_cluster_size {
                 logger::run::<T>(
+                    self.config.id as usize,
                     self.config.clone(),
                     Arc::clone(&self.stop_flag));
         }
