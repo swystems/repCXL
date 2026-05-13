@@ -25,9 +25,6 @@ export RUST_LOG=info
 run_ycsb_client() {
     local node="$1"
 
-    # cheeky config: isolated on the machine 20-120 so 20+id should do for 1-100 clients
-    local core=$((20 + node))
-
     target/release/ycsb_client \
         "ycsb/traces/${WORKLOAD}_load${node}.dat" \
         "ycsb/traces/${WORKLOAD}_run${node}.dat" \

@@ -7,8 +7,6 @@ REPCXL_ID=$1
 WORKLOAD=$2
 CONFIG=$3
 
-# cheeky config: isolated on the machine 20-120 so 20+id should do for 1-100 clients
-CORE=$((20+$REPCXL_ID))
 
 if [ -z "$REPCXL_ID" ]; then
     echo "Usage: $0 <repcxl_id> <workload> <config>"
@@ -21,7 +19,6 @@ fi
 
 # export RUST_LOG=info 
 
-# taskset -c $CORE 
 target/release/ycsb_client \
     ycsb/traces/${WORKLOAD}_load.dat \
     ycsb/traces/${WORKLOAD}_run.dat \

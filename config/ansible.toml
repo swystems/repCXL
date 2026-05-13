@@ -44,16 +44,16 @@ processes = "0-2"
 # Number of logger processes. If the value is N, N repCXL processes will spawn
 # _one_ logger process. The value must be odd (due to quorum-based replication)
 # and cannot be larger than the number of processes in the cluster. 
-logger_cluster_size = 3
+logger_cluster_size = 1
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
 
 # (ns) Duration of the synchronous round (in nanoseconds)
-round_time = 6000 
+round_time = 10 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "async_best_effort"
+algorithm = "fmonster"
 
 # Enable pipelined write path (true/false)
 pipeline = false
