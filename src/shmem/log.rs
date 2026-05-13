@@ -1,6 +1,7 @@
 use crate::request::Wid;
 use super::object_index::ObjectInfo;
 use crate::logger::LogQueueEntry;
+use crate::safe_memio;
 
 pub const LOG_SIZE: usize = 1024; // Size of the log
 
@@ -32,8 +33,22 @@ impl<T: Copy> Log<T> {
     }
 
     pub(crate) fn append(&mut self, wid: Wid, obj_info: ObjectInfo, data: T) {
-        let entry = LogEntry::new(LogQueueEntry::new(wid, obj_info), data);
-        self.entries[self.size % LOG_SIZE] = Some(entry);
+        let update = LogEntry::new(LogQueueEntry::new(wid, obj_info), data);
+        let log_entry = &mut self.entries[self.size % LOG_SIZE];
+        *log_entry = Some(update);
         self.size += 1;
+
+        // flush to mem!
+        unsafe {
+            safe_memio::cache_flush_write(
+                log_entry as *const Option<LogEntry<T>> as *const u8, 
+                std::mem::size_of::<Option<LogEntry<T>>>()
+            );
+
+            safe_memio::cache_flush_write(
+                &self.size as *const usize as *const u8, 
+                std::mem::size_of::<usize>()
+            );
+        }
     }
 }

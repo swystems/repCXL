@@ -404,7 +404,7 @@ pub fn run<T: Copy + PartialEq>(lid: usize, config: RepCXLConfig, stop_flag: Arc
                             for node in &memory_nodes {
                                 // get log
                                 let log = node.get_state().get_log();
-                                // appnd to log
+                                // append to log
                                 log.append(entry.wid, entry.obj_info, v);
                             }
                             log::debug!("[leader]: Appended dirty value to logs for obj {}", entry.obj_info.id);

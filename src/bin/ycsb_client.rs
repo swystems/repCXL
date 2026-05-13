@@ -201,6 +201,13 @@ fn main() {
     }    
     let total_elapsed = start_total.elapsed();
 
+    // wee hack: the coordinator spins the leader logger thread which logs 
+    // dirty read operations. If the coordinator exists so deas the logger and
+    // some processes might be left hanging. Hence we wait a bit with @TODO
+    // find a cleaner solution
+    if rcxl.is_coordinator() {
+        std::thread::sleep(Duration::from_secs(5)); // wait for replicas to finish
+    }
     rcxl.stop();
     std::thread::sleep(Duration::from_millis(1)); // improves stdout
 

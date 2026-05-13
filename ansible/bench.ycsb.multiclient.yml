@@ -72,6 +72,7 @@
           echo ""
           echo "============= RepCXL configuration ============="
           grep "processes =" {{ repcxl_config }}
+          grep "logger_cluster_size =" {{ repcxl_config }}
           grep "algorithm =" {{ repcxl_config }}
           grep "pipeline =" {{ repcxl_config }}
           grep "round_time =" {{ repcxl_config }}

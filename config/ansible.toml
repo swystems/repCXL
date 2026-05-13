@@ -7,25 +7,27 @@ mem_nodes = [
 "/dev/dax0.1",
 "/dev/dax0.2",
 "/dev/dax0.3",
-"/dev/dax0.4",
-"/dev/dax0.5",
-"/dev/dax0.6",
-"/dev/dax0.7",
-"/dev/dax0.8",
-"/dev/dax0.9",
-"/dev/dax0.10",
-"/dev/dax0.11",
-"/dev/dax0.12",
-"/dev/dax0.13",
-"/dev/dax0.14",
-"/dev/dax0.15",
-"/dev/dax0.16",
-"/dev/dax0.17",
-"/dev/dax0.18",
-"/dev/dax0.19",
-"/dev/dax0.20",
-"/dev/dax0.21",
 ]
+
+#"/dev/dax0.4",
+#"/dev/dax0.5",
+#"/dev/dax0.6",
+#"/dev/dax0.7",
+#"/dev/dax0.8",
+#"/dev/dax0.9",
+#"/dev/dax0.10",
+#"/dev/dax0.11",
+#"/dev/dax0.12",
+#"/dev/dax0.13",
+#"/dev/dax0.14",
+#"/dev/dax0.15",
+#"/dev/dax0.16",
+#"/dev/dax0.17",
+#"/dev/dax0.18",
+#"/dev/dax0.19",
+#"/dev/dax0.20",
+#"/dev/dax0.21",
+#]
 
 # memory node/region used for state & shared memory communication with logger processes
 logger_node = "/dev/dax0.0"
@@ -39,12 +41,12 @@ id = 0
 # List of process IDs in the cluster. Can be specified as:
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
-processes = "0-2"
+processes = "0-8"
 
 # Number of logger processes. If the value is N, N repCXL processes will spawn
 # _one_ logger process. The value must be odd (due to quorum-based replication)
 # and cannot be larger than the number of processes in the cluster. 
-logger_cluster_size = 1
+logger_cluster_size = 9
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
@@ -53,7 +55,7 @@ startup_delay = 1000000000
 round_time = 10 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "fmonster"
+algorithm = "async_best_effort"
 
 # Enable pipelined write path (true/false)
 pipeline = false
