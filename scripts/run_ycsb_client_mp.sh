@@ -28,7 +28,7 @@ run_ycsb_client() {
     # cheeky config: isolated on the machine 20-120 so 20+id should do for 1-100 clients
     local core=$((20 + node))
 
-    taskset -c "$core" target/release/ycsb_client \
+    target/release/ycsb_client \
         "ycsb/traces/${WORKLOAD}_load${node}.dat" \
         "ycsb/traces/${WORKLOAD}_run${node}.dat" \
         --config "${CONFIG}" \

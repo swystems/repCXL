@@ -510,6 +510,10 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
         // separately. RepCXL id = logger id (lid)
         if algorithms::requires_logger(&algorithm) &&
             self.view.self_id < self.config.logger_cluster_size {
+                log::info!("Starting logger thread {}/{}", 
+                    self.view.self_id, 
+                    self.config.logger_cluster_size);
+                
                 logger::run::<T>(
                     self.config.id as usize,
                     self.config.clone(),
@@ -536,11 +540,9 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             // WRITE thread
             let wreq_queue = self.wreq_queue_rx.take().expect("Receiver already taken");
 
-            let core_affinity = self.config.core_affinity;
+            let config = self.config.clone();
             std::thread::spawn(move || {
-                if let Some(core) = core_affinity {
-                        core_affinity::set_for_current(core_affinity::CoreId { id: core });
-                }
+                utils::set_core_affinity(&config, false);
                 algorithms::write_thread(&algorithm, wactx, wreq_queue);
             });
 
@@ -549,9 +551,12 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             let rreq_queue = self.rreq_queue_rx.take().expect("Receiver already taken");
 
             std::thread::spawn(move || {
-                // @TODO: pin thread for read?
+                // pin only write thread
                 algorithms::read_thread(&algo, ractx, rreq_queue);
             });
+        }
+        else {
+            utils::set_core_affinity(&self.config, false);
         }
 
 
@@ -611,14 +616,13 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn stop(&self) {
         info!("Stopping repCXL process {}. Goodbye...", self.config.id);
 
-        if self.config.pipeline {
-            info!("Stopping pipelined threads...");
-            self.stop_flag.store(true, Ordering::Relaxed);
-        }
-        else { // if pipelined, the write thread prints stats
-            if self.config.algorithm == "monster" || self.config.algorithm == "fmonster" {
-                self.algorithm_ctx.stats.print();
-            }
+        // stop logger and/or algorithms threads
+        info!("Stopping protocol and logger threads...");
+        self.stop_flag.store(true, Ordering::Relaxed);
+
+        // pipelined threads print stats directly
+        if self.config.algorithm == "monster" || self.config.algorithm == "fmonster" {
+            self.algorithm_ctx.stats.print();
         }
     }
 

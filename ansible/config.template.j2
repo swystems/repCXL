@@ -26,7 +26,9 @@ mem_nodes = [
 "/dev/dax0.20",
 "/dev/dax0.21",
 ]
-log_node = "/dev/dax0.0"
+
+# memory node/region used for state & shared memory communication with logger processes
+logger_node = "/dev/dax0.0"
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
@@ -37,7 +39,6 @@ id = {{ repcxl_id }}
 # List of process IDs in the cluster. Can be specified as:
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
-#   - An array ([0, 1, 2, 3]) → explicit list of IDs
 processes = {{ process_list | to_json }}
 
 # Number of logger processes. If the value is N, N repCXL processes will spawn
@@ -60,8 +61,13 @@ pipeline = {{ (pipeline | default(false)) | string | lower }}
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = {{ read_retries }}
 
-# CPU core to pin the repCXL write thread to (optional, default is None)
-# core_affinity = 2 
+# List of CPU cores. Can be specified as:
+#   - A number (4) → generates [0, 1, 2, 3]
+#   - A range string ("0..3" or "0-3") → generates [0, 1, 2, 3]
+#   - An array ([0, 10, 22, 31]) → explicit list of cores
+# core 0 is not allowed. Core affinity must be larger than the number of processes 
+# and the logger cluster size.
+core_affinity = {{ core_affinity | to_json }} 
 
 {% if read_offset is defined %}
 read_offset = {{ read_offset }}

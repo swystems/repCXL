@@ -7,23 +7,8 @@ use std::fs;
 use crate::shmem;
 use serde::{Deserialize, Deserializer};
 
-// default values for config parameters
-const DEFAULT_MEM_SIZE: usize = 1024 * 1024; // 1 MiB
-const DEFAULT_STARTUP_DELAY: u64 = 1000000000; // 1s
-const DEFAULT_ROUND_TIME_NS: u64 = 100000; //1ms
-const DEFAULT_PROCESSES: &[u32] = &[0]; // default to single process with ID 0
-const DEFAULT_ALGORITHM: &str = "monster";
-const DEFAULT_PIPELINE: bool = false;
-const DEFAULT_READ_RETRIES: usize = 0;
-const DEFAULT_CORE_AFFINITY: Option<usize> = None;
-const DEFAULT_READ_OFFSET: Option<f64> = None;
-const DEFAULT_LOG_NODE: &str = "";
-const DEFAULT_LOGGER_CLUSTER_SIZE: usize = 1;
-
-
-
-/// Parse processes field which can be a number, array, or range string
-fn parse_processes<'de, D>(deserializer: D) -> Result<Vec<u32>, D::Error>
+/// Parse core affinity field which can be a number, array, or range string
+fn parse_core_affinity<'de, D>(deserializer: D) -> Result<Vec<u32>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -74,6 +59,64 @@ where
     }
 }
 
+/// Parse processes field which can be a number or range string
+/// for convenience, we only allow ranger starting from 0 in the current version
+fn parse_processes<'de, D>(deserializer: D) -> Result<Vec<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ProcessSpec {
+        Number(u32),
+        Range(String),
+    }
+    
+    match ProcessSpec::deserialize(deserializer)? {
+        ProcessSpec::Number(n) => Ok((0..n).collect()),
+        ProcessSpec::Range(s) => {
+            // Current version accepts ranges starting from 0
+            // to avoid annoying checks and edgecases
+            if s.chars().nth(0) != Some('0') {
+                return Err(Error::custom(format!("Range must start from 0 in '{}'", s)));
+            }
+
+            // Parse "0-3" or "0..3" formats.
+            if let Some(pos) = s.find("..") {
+                let start: u32 = s[..pos].trim().parse()
+                    .map_err(|_| Error::custom(format!("Invalid range start in '{}'", s)))?;
+                let end: u32 = s[pos+2..].trim().parse()
+                    .map_err(|_| Error::custom(format!("Invalid range end in '{}'", s)))?;
+                Ok((start..=end).collect())
+            } else if let Some(pos) = s.find('-') {
+                // Handle "0-3" format, but avoid negative numbers
+                // if pos > 0 {
+                    let start: u32 = s[..pos].trim().parse()
+                        .map_err(|_| Error::custom(format!("Invalid range start in '{}'", s)))?;
+                    let end: u32 = s[pos+1..].trim().parse()
+                        .map_err(|_| Error::custom(format!("Invalid range end in '{}'", s)))?;
+                    Ok((start..=end).collect())
+                // } else {
+                //     // It's a negative number, try parsing as i32 then convert
+                //     let n = s.parse::<i32>()
+                //         .ok()
+                //         .and_then(|n| if n > 0 { Some(n as u32) } else { None })
+                //         .ok_or_else(|| Error::custom(format!("Invalid process count '{}'", s)))?;
+                //     Ok((0..n).collect())
+                // }
+            } else {
+                // Try parsing string as plain number (count from 0)
+                let n: u32 = s.trim().parse()
+                    .map_err(|_| Error::custom(format!("Invalid process count '{}'", s)))?;
+                Ok((0..n).collect())
+            }
+        }
+    }
+}
+
+
 /// Raw deserialized representation of the TOML config file.
 /// All fields are optional during deserialization  missing fields keep their 
 /// Can be checked with validate() 
@@ -91,27 +134,29 @@ pub struct RepCXLConfig {
     pub pipeline: bool,
     pub read_retries: usize,
     pub read_offset: Option<f64>,
-    pub core_affinity: Option<usize>,
-    pub log_node: String,
+    #[serde(deserialize_with = "parse_core_affinity")]
+    pub core_affinity: Vec<u32>,
+    pub logger_node: String,
     pub logger_cluster_size: usize,
 }
 
+// Default configuration
 impl Default for RepCXLConfig {
     fn default() -> Self {
         Self {
             mem_nodes: Vec::new(),
-            mem_size: DEFAULT_MEM_SIZE,
-            startup_delay: DEFAULT_STARTUP_DELAY,
-            round_time: DEFAULT_ROUND_TIME_NS,
+            mem_size: 1024 * 1024,
+            startup_delay: 1000000000, // 1s
+            round_time: 100000,
             id: -1, // -1 indicates no id provided in config file
-            processes: DEFAULT_PROCESSES.to_vec(), // default to single process with ID 0
-            algorithm: DEFAULT_ALGORITHM.to_string(),
-            pipeline: DEFAULT_PIPELINE,
-            read_retries: DEFAULT_READ_RETRIES,
-            read_offset: DEFAULT_READ_OFFSET,
-            core_affinity: DEFAULT_CORE_AFFINITY,
-            log_node: DEFAULT_LOG_NODE.to_string(),
-            logger_cluster_size: DEFAULT_LOGGER_CLUSTER_SIZE,
+            processes: vec![0], // default to single process with ID 0
+            algorithm: String::from("monster"),
+            pipeline: false,
+            read_retries: 0,
+            read_offset: None,
+            core_affinity: vec![],
+            logger_node: String::new(),
+            logger_cluster_size: 1,
         }
     }
 }
@@ -154,15 +199,13 @@ impl RepCXLConfig {
         }
 
         // core affinity should not use core 0 (reserved for system tasks)
-        if let Some(core) = self.core_affinity {
-            if core == 0 {
-                return Err(format!("{} Avoid using core 0", err_prefix));
-            }
+        if self.core_affinity.contains(&0) {
+            return Err(format!("{} Avoid using core 0", err_prefix));
         }
 
         // log node path must not be empty
-        if self.log_node.is_empty() {
-            return Err(format!("{} log_node must be specified in the config", err_prefix));
+        if self.logger_node.is_empty() {
+            return Err(format!("{} logger_node must be specified in the config", err_prefix));
         }
 
         if self.logger_cluster_size == 0 {
@@ -173,6 +216,11 @@ impl RepCXLConfig {
         }
         if self.logger_cluster_size > self.processes.len() as usize {
             return Err(format!("{} logger_cluster_size cannot be larger than the number of processes", err_prefix));
+        }
+
+        // we assign cores to processes and 
+        if self.core_affinity.len() < self.processes.len() + self.logger_cluster_size {
+            return Err(format!("{} core_affinity list should include enough cores for all processes and loggers", err_prefix));
         }
 
         Ok(())

@@ -19,9 +19,10 @@ if [ -z "$WORKLOAD" ]; then
     WORKLOAD=workloada_64
 fi
 
-export RUST_LOG=info 
+# export RUST_LOG=info 
 
-taskset -c $CORE target/release/ycsb_client \
+# taskset -c $CORE 
+target/release/ycsb_client \
     ycsb/traces/${WORKLOAD}_load.dat \
     ycsb/traces/${WORKLOAD}_run.dat \
     --config ${CONFIG} \

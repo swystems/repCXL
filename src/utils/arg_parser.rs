@@ -106,7 +106,7 @@ impl ArgParser {
                     .value_parser(value_parser!(usize)),
             )
             .arg(
-                Arg::new("log_node")
+                Arg::new("logger_node")
                     .short('l')
                     .long("log-node")
                     .help("Path used for log node output")
@@ -160,11 +160,12 @@ impl ArgParser {
         if let Some(read_retries) = matches.remove_one::<usize>("read_retries") {
             self.config.read_retries = read_retries;
         }
-        if let Some(core_affinity) = matches.remove_one::<usize>("core_affinity") {
-            self.config.core_affinity = Some(core_affinity);
-        }
-        if let Some(log_node) = matches.remove_one::<String>("log_node") {
-            self.config.log_node = log_node;
+        // core affinity can be only specified in the config file
+        // if let Some(core_affinity) = matches.remove_one::<usize>("core_affinity") {
+        //     self.config.core_affinity = core_affinity;
+        // }
+        if let Some(logger_node) = matches.remove_one::<String>("logger_node") {
+            self.config.logger_node = logger_node;
         }
         if let Some(logger_cluster_size) = matches.remove_one::<usize>("logger_cluster_size") {
             self.config.logger_cluster_size = logger_cluster_size;

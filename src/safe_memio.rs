@@ -83,6 +83,14 @@ pub struct ObjectMemoryEntry<T> {
     pub value: T,
 }
 
+impl<T> PartialEq for ObjectMemoryEntry<T> 
+where T: PartialEq
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.wid == other.wid && self.value == other.value
+    }
+}
+
 impl<T: Copy> ObjectMemoryEntry<T> {
     pub fn new(wid: Wid, value: T) -> Self {
         ObjectMemoryEntry { wid, value }
@@ -233,11 +241,11 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> R
     // wait for flush to complete before reading
     unsafe { _mm_lfence(); }
 
-    let start = std::time::Instant::now(); // debug read times
+    // let start = std::time::Instant::now(); // debug read times
 
     // now read both from memory    
     let mut addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    let debug_step1 = start.elapsed().as_nanos(); // debug read times
+    // let debug_step1 = start.elapsed().as_nanos(); // debug read times
     let first = match safe_read(addr) {
         Ok(data) => data,
         Err(e) => {
@@ -249,7 +257,7 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> R
         }
     };
 
-    let debug_step2 = start.elapsed().as_nanos(); // debug read times
+    // let debug_step2 = start.elapsed().as_nanos(); // debug read times
     
     // read the last node
     addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
@@ -263,13 +271,13 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> R
             return Err(MemoryError(last_node.id));
         }
     };
-    let debug_step3 = start.elapsed().as_nanos(); // debug read times
+    // let debug_step3 = start.elapsed().as_nanos(); // debug read times
     
-    log::debug!("write_size: {}B, step 1: {} step2: {}, step3: {}", 
-        size_of::<ObjectMemoryEntry<T>>(), 
-        debug_step1, 
-        debug_step2-debug_step1, 
-        debug_step3 - debug_step2);
+    // log::debug!("write_size: {}B, step 1: {} step2: {}, step3: {}", 
+    //     size_of::<ObjectMemoryEntry<T>>(), 
+    //     debug_step1, 
+    //     debug_step2-debug_step1, 
+    //     debug_step3 - debug_step2);
 
 
     Ok([first, last])

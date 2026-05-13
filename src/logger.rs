@@ -4,6 +4,7 @@ use crate::shmem::object_index::ObjectInfo;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::safe_memio;
 use crate::request::Wid;
+use crate::utils;
 
 // whether to sleep in the follower loop to reduce CPU usage (at the cost of slower failure detection)
 const ELECTION_SLEEP: bool = true; 
@@ -77,7 +78,7 @@ impl LoggerInterface {
         } else {
             size
         };
-        let ptr = mmap_daxdev(config.log_node.as_str(), size) as *mut LoggerSharedState;
+        let ptr = mmap_daxdev(config.logger_node.as_str(), size) as *mut LoggerSharedState;
         
         unsafe {
             (*ptr) = LoggerSharedState::new();
@@ -303,17 +304,25 @@ impl LoggerInterface {
 /// Check if a log entry is still dirty and return the dirty value if it exists.
 /// This condition is evaluated when the value of log entry still exists some memory 
 /// nodes, not all, still contain it
-fn check_dirty<T: Copy>(memory_nodes: &Vec<MemoryNode<T>>, entry: &LogQueueEntry) -> Option<T> {
+fn check_dirty<T: Copy + PartialEq>(memory_nodes: &Vec<MemoryNode<T>>, entry: &LogQueueEntry) -> Option<T> {
     match safe_memio::mem_readends(entry.obj_info.offset, memory_nodes) {
         Ok(states) => {
 
             // check if consistent
-            if states[0].wid == states[1].wid {return None;} 
-            // check if the dirty value has not been overwritten by a new write
-            if states[0].wid == entry.wid {return Some(states[0].value);}
-            if states[1].wid == entry.wid {return Some(states[1].value);}
+            if states[0] == states[1] {return None;}
 
-            None
+            // check if the dirty value has not been overwritten by a new write
+            // if states[0].wid == entry.wid {return Some(states[0].value);}
+            // if states[1].wid == entry.wid {return Some(states[1].value);}
+            // None
+
+            // return the value of the latest wid
+            if states[0].wid > states[1].wid {
+                return Some(states[0].value);
+            } else {
+                return Some(states[1].value);
+            }
+
         },
         Err(safe_memio::MemoryError(e)) => { 
             log::error!("Failed to read object state for obj {} in memory node {}", 
@@ -339,9 +348,11 @@ fn check_dirty<T: Copy>(memory_nodes: &Vec<MemoryNode<T>>, entry: &LogQueueEntry
 /// on the _next_ available index to avoid the old leader to overwrite the log entry
 /// We don't care about empty slots in the log, repcxl processes read the entire
 /// log when recovery and discard empty entries
-pub fn run<T: Copy>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>) {
+pub fn run<T: Copy + PartialEq>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>) {
 
     std::thread::spawn(move || {
+
+        utils::set_core_affinity(&config, true);
 
         let mut memory_nodes = Vec::new();
 
@@ -360,9 +371,14 @@ pub fn run<T: Copy>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>
         let mut running_for_election = false;
         // let lid = config.id as usize; // logger id = repcxl id
 
+        let mut logger_latency_total = 0;
+        let mut logger_latency_count = 0;
         loop {
             // stop with algorithms threads on rep_cxl.stop()
             if stop_flag.load(Ordering::Relaxed) {
+                if logger_latency_count > 0 {
+                    log::info!("Average logger latency: {}", utils::fmt_ns(logger_latency_total / logger_latency_count));
+                }
                 break;
             }
 
@@ -371,16 +387,18 @@ pub fn run<T: Copy>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>
                 
                 // p just became a leader
                 if running_for_election {
-                    log::debug!("[logger-election] {}: Election won, now leader for term {}", lid, my_vote.term);
+                    log::debug!("[election] {}: Election won, now leader for term {}", lid, my_vote.term);
                     running_for_election = false;
                     lif.uncandidate(lid);
                 } 
                 
                 // p is (and was) the current active leader
                 if !running_for_election {
-                // read log entry from queue
+                    
+                    // read log entry from queue
                     if let (Some(entry), pid) = lif.poll_next_process_queue() {
-                        log::debug!("[logger-election]: Processing log queue for obj {} from pid {}", 
+                        let logger_latency = std::time::Instant::now();
+                        log::debug!("[leader]: Processing log queue for obj {} from pid {}", 
                             entry.obj_info.id, pid);
                         if let Some(v) = check_dirty(&memory_nodes, &entry) {
                             for node in &memory_nodes {
@@ -389,14 +407,16 @@ pub fn run<T: Copy>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>
                                 // appnd to log
                                 log.append(entry.wid, entry.obj_info, v);
                             }
-                            log::debug!("[logger-election]: Appended dirty value to logs for obj {}", entry.obj_info.id);
+                            log::debug!("[leader]: Appended dirty value to logs for obj {}", entry.obj_info.id);
                         } else {
-                            log::debug!("[logger-election]: No dirty value found for obj {} - clearing entry", entry.obj_info.id);
+                            log::debug!("[leader]: No dirty value found for obj {} - clearing entry", entry.obj_info.id);
                         }
 
                         // In all cases clear the queue entry so waiting processes won't hang.
                         lif.clear_process_queue(pid);
-                        log::debug!("[logger-election]: Cleared log queue entry");
+                        log::debug!("[leader]: Cleared log queue entry");
+                        logger_latency_total += logger_latency.elapsed().as_nanos() as u64;
+                        logger_latency_count += 1;
                     }
     
                 }
@@ -408,7 +428,7 @@ pub fn run<T: Copy>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>
             // FOLLOWER logic
             if let Some(candidate_vote) = lif.check_new_election() {
                 
-                log::debug!("[logger-election] {}: Detected election for candidate {}, term {}", 
+                log::debug!("[election] {}: Detected election for candidate {}, term {}", 
                     lid, 
                     candidate_vote.candidate_id, 
                     candidate_vote.term
@@ -421,7 +441,10 @@ pub fn run<T: Copy>(lid: usize, config: RepCXLConfig, stop_flag: Arc<AtomicBool>
 
             }
             if lif.has_been_nominated(lid) {
-                log::debug!("[logger-election] starting election for logger {} with term {}", lid, my_vote.term + 1);
+                log::debug!("[election] {}: Starting election for candidate {}, term {}", 
+                    lid, 
+                    my_vote.candidate_id, 
+                    my_vote.term + 1);
                 // start election
                 my_vote.new_election = true;
                 // vote for self

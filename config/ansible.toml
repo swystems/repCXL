@@ -26,7 +26,9 @@ mem_nodes = [
 "/dev/dax0.20",
 "/dev/dax0.21",
 ]
-log_node = "/dev/dax0.0"
+
+# memory node/region used for state & shared memory communication with logger processes
+logger_node = "/dev/dax0.0"
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
@@ -37,8 +39,7 @@ id = 0
 # List of process IDs in the cluster. Can be specified as:
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
-#   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = "0-8"
+processes = "0-2"
 
 # Number of logger processes. If the value is N, N repCXL processes will spawn
 # _one_ logger process. The value must be odd (due to quorum-based replication)
@@ -52,14 +53,19 @@ startup_delay = 1000000000
 round_time = 6000 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "lock"
+algorithm = "async_best_effort"
 
 # Enable pipelined write path (true/false)
 pipeline = false
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 10
+read_retries = 1
 
-# CPU core to pin the repCXL write thread to (optional, default is None)
-# core_affinity = 2 
+# List of CPU cores. Can be specified as:
+#   - A number (4) → generates [0, 1, 2, 3]
+#   - A range string ("0..3" or "0-3") → generates [0, 1, 2, 3]
+#   - An array ([0, 10, 22, 31]) → explicit list of cores
+# core 0 is not allowed. Core affinity must be larger than the number of processes 
+# and the logger cluster size.
+core_affinity = "20-120" 
 

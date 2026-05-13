@@ -1,5 +1,6 @@
 use std::time::Duration;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::config::RepCXLConfig;
 
 pub mod arg_parser;
 // pub mod mc_bench;
@@ -135,4 +136,28 @@ impl Clone for RWSpinlock {
     fn clone(&self) -> Self {
         Self::new()
     }
+}
+
+
+/// Set the core affinity for the current repcxl/logger process if a core_affinity 
+/// range was provided in the configuration. 
+pub fn set_core_affinity(config: &RepCXLConfig, is_logger: bool) {
+    let rid = config.id as usize; // RepCXL id
+
+    if config.core_affinity.len() < config.processes.len() + config.logger_cluster_size {
+        println!("core_affinity: {:?}", config.core_affinity);
+        panic!("broken config validation: core_affinity length must be \
+        at least the total number of processes (including loggers)");
+    }
+
+    if !config.core_affinity.is_empty() {    
+        let core = if !is_logger {
+            config.core_affinity[rid]
+        } else {
+            config.core_affinity[rid + config.processes.len()]
+        };
+
+        core_affinity::set_for_current(core_affinity::CoreId { id: core as usize});
+    }
+    
 }
