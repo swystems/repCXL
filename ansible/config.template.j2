@@ -69,7 +69,9 @@ read_retries = {{ read_retries }}
 #   - An array ([0, 10, 22, 31]) → explicit list of cores
 # core 0 is not allowed. Core affinity must be larger than the number of processes 
 # and the logger cluster size.
+{% if core_affinity is defined %}
 core_affinity = {{ core_affinity | to_json }} 
+{% endif %}
 
 {% if read_offset is defined %}
 read_offset = {{ read_offset }}

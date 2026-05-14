@@ -144,13 +144,15 @@ impl Clone for RWSpinlock {
 pub fn set_core_affinity(config: &RepCXLConfig, is_logger: bool) {
     let rid = config.id as usize; // RepCXL id
 
-    if config.core_affinity.len() < config.processes.len() + config.logger_cluster_size {
-        println!("core_affinity: {:?}", config.core_affinity);
-        panic!("broken config validation: core_affinity length must be \
-        at least the total number of processes (including loggers)");
-    }
-
+    // no core pinning if empty
     if !config.core_affinity.is_empty() {    
+
+        if config.core_affinity.len() < config.processes.len() + config.logger_cluster_size {
+            println!("core_affinity: {:?}", config.core_affinity);
+            panic!("broken config validation: core_affinity length must be \
+            at least the total number of processes (including loggers)");
+        }
+
         let core = if !is_logger {
             config.core_affinity[rid]
         } else {

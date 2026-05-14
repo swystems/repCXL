@@ -219,7 +219,7 @@ impl RepCXLConfig {
         }
 
         // we assign cores to processes and 
-        if self.core_affinity.len() < self.processes.len() + self.logger_cluster_size {
+        if !self.core_affinity.is_empty() && self.core_affinity.len() < self.processes.len() + self.logger_cluster_size {
             return Err(format!("{} core_affinity list should include enough cores for all processes and loggers", err_prefix));
         }
 
