@@ -1,6 +1,7 @@
 use std::time::Duration;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::config::RepCXLConfig;
+use crate::{safe_memio, timer};
 
 pub mod arg_parser;
 // pub mod mc_bench;
@@ -78,6 +79,13 @@ impl RWSpinlock {
         const READER_INC: usize = 2;
 
         loop {
+            timer::cxl_switch_delay();
+            // flush fence
+            unsafe {
+                safe_memio::cache_flush_read(
+                    &self.state as *const AtomicUsize as *const u8, 
+                    std::mem::size_of::<AtomicUsize>());
+            }
             let state = self.state.load(Ordering::Relaxed);
             if (state & WRITER_BIT) != 0 {
                 std::hint::spin_loop();
@@ -85,6 +93,13 @@ impl RWSpinlock {
             }
 
             // self.state = state checks whether a writer has acquired the lock since we read the state
+            timer::cxl_switch_delay();
+            // flush fence
+            unsafe {
+                safe_memio::cache_flush_write(
+                    &self.state as *const AtomicUsize as *const u8, 
+                    std::mem::size_of::<AtomicUsize>());
+            }
             if self.state.compare_exchange(
                     state,
                     state + READER_INC,
@@ -101,12 +116,27 @@ impl RWSpinlock {
 
     pub fn read_unlock(&self) {
         const READER_INC: usize = 2;
+        timer::cxl_switch_delay();
+
+        unsafe {
+            safe_memio::cache_flush_write(
+                &self.state as *const AtomicUsize as *const u8, 
+                std::mem::size_of::<AtomicUsize>());
+        }
+    
         self.state.fetch_sub(READER_INC, Ordering::Release);
     }
 
     pub fn write_lock(&self) {
         const WRITER_BIT: usize = 1;
         loop {
+            timer::cxl_switch_delay();
+            // flush fence
+            unsafe {
+                safe_memio::cache_flush_write(
+                    &self.state as *const AtomicUsize as *const u8, 
+                    std::mem::size_of::<AtomicUsize>());
+            }
             if self.state.compare_exchange(
                     0, 
                     WRITER_BIT, 
@@ -121,6 +151,12 @@ impl RWSpinlock {
     }
 
     pub fn write_unlock(&self) {
+        // flush fence
+        unsafe {
+            safe_memio::cache_flush_write(
+                &self.state as *const AtomicUsize as *const u8, 
+                std::mem::size_of::<AtomicUsize>());
+        }
         self.state.store(0, Ordering::Release);
     }
 }
