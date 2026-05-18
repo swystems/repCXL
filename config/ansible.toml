@@ -7,10 +7,10 @@ mem_nodes = [
 "/dev/dax0.1",
 "/dev/dax0.2",
 "/dev/dax0.3",
-"/dev/dax0.4",
-"/dev/dax0.5",
-"/dev/dax0.6",
-"/dev/dax0.7",
+# "/dev/dax0.4",
+# "/dev/dax0.5",
+# "/dev/dax0.6",
+# "/dev/dax0.7",
 # "/dev/dax0.8",
 # "/dev/dax0.9",
 # "/dev/dax0.10",
@@ -39,7 +39,7 @@ id = 0
 # List of process IDs in the cluster. Can be specified as:
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
-processes = "0-8"
+processes = "0-95"
 
 # Number of logger processes. If the value is N, N repCXL processes will spawn
 # _one_ logger process. The value must be odd (due to quorum-based replication)
@@ -50,7 +50,7 @@ logger_cluster_size = 3
 startup_delay = 1000000000
 
 # (ns) Duration of the synchronous round (in nanoseconds)
-round_time = 10 
+round_time = 1300 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
 algorithm = "lock"
@@ -67,5 +67,5 @@ read_retries = 10
 #   - An array ([0, 10, 22, 31]) → explicit list of cores
 # core 0 is not allowed. Core affinity must be larger than the number of processes 
 # and the logger cluster size.
-core_affinity = "30-120" 
+core_affinity = "20-120" 
 
