@@ -11,6 +11,24 @@ use clap::{Arg, value_parser};
 use log::{debug, info, error};
 use std::time::Duration;
 
+/// primitive way to parse usize at compile time (required by repcxl)
+/// @TODO: untie repCXL from generic object type and remove this hack
+const fn parse_usize(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut result = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        result = result * 10 + (bytes[i] - b'0') as usize;
+        i += 1;
+    }
+    result
+}
+
+const OBJECT_SIZE: usize = match option_env!("OBJECT_SIZE") {
+    Some(s) => parse_usize(s),
+    None => 64,
+};
+
 /// Convert Vec<u8> to fixed-size array, truncating or padding with zeros as needed
 fn vec_to_array<const N: usize>(vec: &Vec<u8>) -> [u8; N] {
     let mut arr = [0u8; N];
@@ -60,7 +78,7 @@ fn main() {
     }
 
     // Initialize RepCXL client and local index
-    let mut rcxl = RepCXL::<[u8; 64]>::new(ap.config);
+    let mut rcxl = RepCXL::<[u8; OBJECT_SIZE]>::new(ap.config);
     let mut index = std::collections::HashMap::new();
 
     // LOAD PHASE: populate index and memory nodes
@@ -74,7 +92,7 @@ fn main() {
                 rep_cxl::utils::ycsb::OpType::Insert => {
                     
                     // truncate/pad to fixed-size
-                    let value: [u8; 64] = vec_to_array(&op.fields[0].1);
+                    let value: [u8; OBJECT_SIZE] = vec_to_array(&op.fields[0].1);
 
                     if let Some(obj) = rcxl.new_object_with_val(oid, value) {
                         index.insert(op.key, obj);
@@ -180,7 +198,7 @@ fn main() {
                 }
             },
             rep_cxl::utils::ycsb::OpType::Update => {
-                let value: [u8; 64] = vec_to_array(&op.fields[0].1);
+                let value: [u8; OBJECT_SIZE] = vec_to_array(&op.fields[0].1);
 
                 if let Some(obj) = index.get(&op.key) {
                     let start = std::time::Instant::now();
@@ -206,7 +224,7 @@ fn main() {
     // some processes might be left hanging. Hence we wait a bit with @TODO
     // find a cleaner solution
     if rcxl.is_coordinator() {
-        std::thread::sleep(Duration::from_secs(15)); // wait for replicas to finish
+        std::thread::sleep(Duration::from_secs(2)); // wait for replicas to finish
     }
     rcxl.stop();
     std::thread::sleep(Duration::from_millis(1)); // improves stdout

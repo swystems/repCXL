@@ -29,7 +29,7 @@
     - name: build repCXL client
       shell: |
         source $HOME/.cargo/env
-        cargo build --release --bin ycsb_client
+        OBJECT_SIZE={{ object_size }} cargo build --release --bin ycsb_client
       args: 
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
