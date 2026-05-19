@@ -59,12 +59,18 @@ fn main() {
             .required(true)
             .index(2)
             .value_parser(value_parser!(String)),
+        Arg::new("coordinator_delay")
+            .long("coordinator_delay")
+            .help("Delay for the coordinator in seconds before ending the benchmark")
+            .required(true)
+            .value_parser(value_parser!(u64)),
     ]);
     
     let extra_args = ap.parse();
     
     let load_trace = extra_args.get_one::<String>("load_trace").unwrap();
     let run_trace = extra_args.get_one::<String>("run_trace").unwrap();
+    let coordinator_delay = extra_args.get_one::<u64>("coordinator_delay").unwrap();
 
     let mut workload = load_ycsb_workload(load_trace, run_trace);
     // workload.summary();
@@ -224,7 +230,7 @@ fn main() {
     // some processes might be left hanging. Hence we wait a bit with @TODO
     // find a cleaner solution
     if rcxl.is_coordinator() {
-        std::thread::sleep(Duration::from_secs(20)); // wait for replicas to finish
+        std::thread::sleep(Duration::from_secs(coordinator_delay.clone())); // wait for replicas to finish
     }
     rcxl.stop();
     std::thread::sleep(Duration::from_millis(1)); // improves stdout
