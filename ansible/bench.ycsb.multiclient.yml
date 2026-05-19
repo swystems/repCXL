@@ -1,5 +1,5 @@
 - name: Run YCSB cliient benchmark
-  hosts: vms
+  hosts: servers
   gather_facts: no
   tasks: 
     - set_fact:
@@ -29,7 +29,7 @@
     - name: build repCXL client
       shell: |
         source $HOME/.cargo/env
-         OBJECT_SIZE={{ object_size }} cargo build --release --bin ycsb_client
+        OBJECT_SIZE={{ object_size }} cargo build --release --bin ycsb_client
       args: 
         executable: /bin/bash
         chdir: "{{ remote_dir }}"
@@ -37,6 +37,7 @@
     # output stderr redirect to make ansible display the error message
     - name: run repCXL client replicas
       shell: |
+        ulimit -s unlimited && \
         scripts/run_ycsb_client_mp.sh {{ repcxl_num_of_clients }} {{ ycsb_workload }} {{ repcxl_config }}
       args:
         executable: /bin/bash

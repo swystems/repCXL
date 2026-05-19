@@ -1,6 +1,6 @@
 ---
 - name: Deploy local repCXL repo
-  hosts: vms
+  hosts: servers
   tasks:
     - set_fact:
         repcxl_id: "{{ inventory_hostname | regex_replace('^p','') | int }}"

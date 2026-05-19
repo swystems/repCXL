@@ -224,7 +224,7 @@ fn main() {
     // some processes might be left hanging. Hence we wait a bit with @TODO
     // find a cleaner solution
     if rcxl.is_coordinator() {
-        std::thread::sleep(Duration::from_secs(2)); // wait for replicas to finish
+        std::thread::sleep(Duration::from_secs(20)); // wait for replicas to finish
     }
     rcxl.stop();
     std::thread::sleep(Duration::from_millis(1)); // improves stdout

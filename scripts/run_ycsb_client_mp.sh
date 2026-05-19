@@ -35,7 +35,7 @@ run_ycsb_client() {
 
 # start coordinator and wait for it init state and create objects
 run_ycsb_client 0 &
-sleep 2 # might need to be adjusted for large workloads
+sleep 20 # might need to be adjusted for large workloads
 
 for node in $(seq 1 $((NCLIENTS-1))); do
     run_ycsb_client "$node" &
