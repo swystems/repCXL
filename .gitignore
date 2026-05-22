@@ -5,10 +5,6 @@
 Cargo.lock
 target/
 
-# Benchmark work files
-*.dat
-bench_2*
-
 # other
 bpsleep
 .env

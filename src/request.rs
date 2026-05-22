@@ -40,15 +40,23 @@ impl<T> ReadRequest<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
+pub struct ReadDirtyPayload<T>{
+    pub wid: Wid,
+    pub(crate) obj_info: ObjectInfo,
+    pub data: T,
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum ReadReturn<T> {
     ReadSafe(T),
-    ReadDirty(T),
+    ReadDirty(ReadDirtyPayload<T>),
 }
 
 /// RepCXL write request unique identifier. Stored next to every object
 /// Comparison checks for largest round number and smallest process ID if
 /// round numbers are equal.
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Wid {
     pub round_num: u64,
@@ -73,7 +81,7 @@ impl Ord for Wid {
         match self.round_num.cmp(&other.round_num) {
             std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
             std::cmp::Ordering::Less => std::cmp::Ordering::Less,
-            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id),
+            std::cmp::Ordering::Equal => other.process_id.cmp(&self.process_id), // smaller pid wins
         }
     }
 }

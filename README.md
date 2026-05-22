@@ -17,5 +17,7 @@ functionality.
 
 ## Pre-requisites
 
+Compatible with x86 only. 
+
 - Rust
 - `ansible/README.md` for benchmark requirements.

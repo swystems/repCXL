@@ -4,14 +4,34 @@
 # Memory nodes. In the VM setup, memory regions of the CXL node from the host 
 # are exposed as PCI devices with inter-vm shared memory 
 mem_nodes = [
-"/dev/dax0.0",
 "/dev/dax0.1",
 "/dev/dax0.2",
-] 
+"/dev/dax0.3",
+# "/dev/dax0.4",
+# "/dev/dax0.5",
+# "/dev/dax0.6",
+# "/dev/dax0.7",
+# "/dev/dax0.8",
+# "/dev/dax0.9",
+# "/dev/dax0.10",
+# "/dev/dax0.11",
+# "/dev/dax0.12",
+# "/dev/dax0.13",
+# "/dev/dax0.14",
+# "/dev/dax0.15",
+# "/dev/dax0.16",
+# "/dev/dax0.17",
+# "/dev/dax0.18",
+# "/dev/dax0.19",
+# "/dev/dax0.20",
+# "/dev/dax0.21",
+]
+
+# memory node/region used for state & shared memory communication with logger processes
+logger_node = "/dev/dax0.0"
 
 # Total size of each memory node in bytes, padded to chunk size
 mem_size = 1_000_000_000 
-chunk_size = 64
 
 # (required) unique identifier for the repCXL instance. Can be passed with -i
 id = {{ repcxl_id }} 
@@ -19,8 +39,12 @@ id = {{ repcxl_id }}
 # List of process IDs in the cluster. Can be specified as:
 #   - A number (4) → generates IDs [0, 1, 2, 3]
 #   - A range string ("0..3" or "0-3") → generates IDs [0, 1, 2, 3]
-#   - An array ([0, 1, 2, 3]) → explicit list of IDs
-processes = {{ process_list }}
+processes = {{ process_list | to_json }}
+
+# Number of logger processes. If the value is N, N repCXL processes will spawn
+# _one_ logger process. The value must be odd (due to quorum-based replication)
+# and cannot be larger than the number of processes in the cluster. 
+logger_cluster_size = {{ logger_cluster_size }}
 
 # (ns) Time to wait for all processes to start up (in nanoseconds)
 startup_delay = 1000000000
@@ -37,8 +61,15 @@ pipeline = {{ (pipeline | default(false)) | string | lower }}
 # Number of times to retry a read operation if it returns a dirty read
 read_retries = {{ read_retries }}
 
-# CPU core to pin the repCXL write thread to (optional, default is None)
-# core_affinity = 2 
+# List of CPU cores. Can be specified as:
+#   - A number (4) → generates [0, 1, 2, 3]
+#   - A range string ("0..3" or "0-3") → generates [0, 1, 2, 3]
+#   - An array ([0, 10, 22, 31]) → explicit list of cores
+# core 0 is not allowed. Core affinity must be larger than the number of processes 
+# and the logger cluster size.
+{% if core_affinity is defined %}
+core_affinity = {{ core_affinity | to_json }} 
+{% endif %}
 
 {% if read_offset is defined %}
 read_offset = {{ read_offset }}

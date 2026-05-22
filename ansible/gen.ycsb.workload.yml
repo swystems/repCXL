@@ -1,7 +1,11 @@
-- name: Run YCSB cliient benchmark
-  hosts: vms
+- name: Run YCSB client benchmark
+  hosts: servers
+  serial: 4
   gather_facts: no
   tasks:
+
+    - set_fact:
+        repcxl_id: "{{ inventory_hostname | regex_replace('^p','') | int }}"
 
     - name: create remote work directory if it doesn't exist
       file:
@@ -24,10 +28,11 @@
     
     - name: generate workload file for YCSB client
       shell: |
-        bin/ycsb load basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_load.dat
-        bin/ycsb run basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_run.dat
-
+        bin/ycsb load basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_load{{i}}.dat
+        bin/ycsb run basic -P {{ yfp }}/workloads/{{ ycsb_workload }} > {{ yfp }}/traces/{{ ycsb_workload }}_run{{i}}.dat
       args:
         executable: /bin/bash
         chdir: "{{ ycsb_remote_source_dir }}"
-
+      loop: "{{ range(0, ycsb_gen_iterations | int) | list }}"
+      loop_control:
+        loop_var: i

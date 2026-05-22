@@ -8,11 +8,11 @@
 //!
 
 use rand::Rng;
-use rand::prelude::IndexedRandom;  // Enables choose() on slices
 use crate::request::Wid;
 use crate::shmem::MemoryNode;
+use crate::timer;
 use log::error;
-use core::arch::x86_64::{_mm_mfence, _mm_sfence};
+use core::arch::x86_64::*;
 
 const FAILURE_PROBABILITY: f32 = 0.0;
 pub const CACHE_LINE_SIZE: usize = 64;
@@ -43,7 +43,10 @@ pub(crate) unsafe fn clflushopt_range(addr: *const u8, size: usize) {
 #[inline(always)]
 pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
-    _mm_sfence();
+    _mm_mfence();
+
+    // delay by measured CXL switch delay in switchless setups after flush operation
+    timer::cxl_switch_delay();
 }
 
 /// Flush + mfence: ensures cache lines are evicted before subsequent loads.
@@ -53,6 +56,9 @@ pub(crate) unsafe fn cache_flush_write(addr: *const u8, size: usize) {
 pub(crate) unsafe fn cache_flush_read(addr: *const u8, size: usize) {
     clflushopt_range(addr, size);
     _mm_mfence();
+
+    // delay by measured CXL switch delay in switchless setups after flush operation
+    timer::cxl_switch_delay();
 }
 
 pub(crate) fn mem_write_flush<T: Copy>(addr: *mut T, data: T) {
@@ -66,12 +72,23 @@ pub(crate) fn mem_write_flush<T: Copy>(addr: *mut T, data: T) {
 pub struct MemoryError(pub usize);
 
 
+
 /// ObjectMemoryEntry. Stores the current write ID and the value of the object
-/// in memory.
-#[derive(Debug, Clone, Copy)]
+/// in memory. Currently allocation the algorithm chunk size ensures that 
+/// each entry is aligned and padded to 64B
+#[repr(C, align(64))]
+#[derive(Debug, Copy, Clone)]
 pub struct ObjectMemoryEntry<T> {
     pub wid: Wid,
     pub value: T,
+}
+
+impl<T> PartialEq for ObjectMemoryEntry<T> 
+where T: PartialEq
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.wid == other.wid && self.value == other.value
+    }
 }
 
 impl<T: Copy> ObjectMemoryEntry<T> {
@@ -85,7 +102,45 @@ impl<T: Copy> ObjectMemoryEntry<T> {
             value,
         }
     }
+
+    
+    fn as_ptr(&self) -> *const u8 {
+        self as *const Self as *const u8
+    }
 }
+
+/// Non-temporal write of an ObjectMemoryEntry to the given address, bypassing cache. 
+/// However, this function might return earlier than the write is visibe to 
+/// _other nodes_, it only ensures visibility across different processes in the same
+/// node. 
+#[allow(dead_code)]
+#[cfg(target_arch = "x86_64")]
+unsafe fn nvwrite<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) {
+    let mut len_64pad = (size_of::<ObjectMemoryEntry<T>>() + 63) / 64 * 64; // 64B aligned size
+    let mut src_ptr = data.as_ptr();
+    let mut dest_ptr = addr as *mut u8;
+
+
+    log::debug!("alginment of dest_ptr: {}, size of entry: {}, len_64pad: {}", 
+        (dest_ptr as usize) % 64, 
+        size_of::<ObjectMemoryEntry<T>>(), 
+        len_64pad);
+
+    while len_64pad >= 64 {
+        // Load 64 bytes from string (unaligned load is fine for source)
+        let chunk = _mm512_stream_load_si512(src_ptr as *const __m512i);
+        
+        // Non-temporal store, must be 64B aligned (ensured by allocation)
+        _mm512_stream_si512(dest_ptr as *mut __m512i, chunk);
+
+        src_ptr = src_ptr.add(64);
+        dest_ptr = dest_ptr.add(64);
+        len_64pad -= 64;
+    }
+
+    _mm_sfence();
+}
+
 
 pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEntry<T>) -> Result<(), &'static str> {
     if FAILURE_PROBABILITY > 0.0 {
@@ -97,7 +152,10 @@ pub fn safe_write<T: Copy>(addr: *mut ObjectMemoryEntry<T>, data: ObjectMemoryEn
     }
 
     // mechanism to handle segfault here, signal catch plus backup process
+    
+    // write to memory
     unsafe { std::ptr::write_volatile(addr, data); }
+ 
     Ok(())
 }
 
@@ -111,30 +169,16 @@ pub fn safe_read<T: Copy>(addr: *mut ObjectMemoryEntry<T>) -> Result<ObjectMemor
     }
     // mechanism to handle segfault here, signal catch plus backup process
 
+    // delay by measured CXL switch delay in switchless setups
+    timer::cxl_switch_delay();
+
     Ok(unsafe { std::ptr::read_volatile(addr) })
 }
 
-/// Read the value from all memory nodes for the given object
-pub fn _mem_readone<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
-
-    let node = mem_nodes.choose(&mut rand::rng()).unwrap();  // Returns Option<&T>
-
-    let addr = node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    match safe_read(addr) {
-        Ok(ome) => return Ok(ome),
-        Err(e) => {
-            error!(
-                "Safe read failed. Node {}, offset {}: {}",
-                node.id, offset, e
-            );
-            return Err(MemoryError(node.id));
-        }
-    }
-}
 
 /// Write the an ObjectMemoryEntry to all memory nodes at its given memory offset 
 /// Flush&fence to ensure visibility
-pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes: &Vec<MemoryNode>) -> Result<(), MemoryError> {
+pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes: &Vec<MemoryNode<T>>) -> Result<(), MemoryError> {
 
     // write data to all memory nodes
     for node in mem_nodes {
@@ -153,12 +197,16 @@ pub fn mem_writeall<T: Copy>(offset: usize, ome: ObjectMemoryEntry<T>, mem_nodes
     // fence once only after all writes to all mem nodes are flushed
     unsafe { _mm_mfence(); }
 
+    // delay by measured CXL switch delay in switchless setups after flush 
+    // operation
+    timer::cxl_switch_delay();
+
     Ok(())
 }
     
 
 /// Read the value from all memory nodes for the given object
-pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
+pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Result<Vec<ObjectMemoryEntry<T>>, MemoryError> {
     let mut states = Vec::with_capacity(mem_nodes.len());
     for node in mem_nodes {
         let addr = node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
@@ -180,7 +228,7 @@ pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resul
 /// Read the value from the first and last memory nodes only, exploiting the
 /// fact that memory nodes are written to always in the same order. Used for
 /// scalability improvements
-pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
+pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
     
     let first_node = &mem_nodes[0];
     let last_node = &mem_nodes[mem_nodes.len() - 1];
@@ -191,13 +239,13 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
         unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
     }
     // wait for flush to complete before reading
-    unsafe { _mm_mfence(); }
+    unsafe { _mm_lfence(); }
 
-    let start = std::time::Instant::now(); // debug read times
+    // let start = std::time::Instant::now(); // debug read times
 
     // now read both from memory    
     let mut addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    let debug_step1 = start.elapsed().as_nanos(); // debug read times
+    // let debug_step1 = start.elapsed().as_nanos(); // debug read times
     let first = match safe_read(addr) {
         Ok(data) => data,
         Err(e) => {
@@ -209,7 +257,7 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
         }
     };
 
-    let debug_step2 = start.elapsed().as_nanos(); // debug read times
+    // let debug_step2 = start.elapsed().as_nanos(); // debug read times
     
     // read the last node
     addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
@@ -223,15 +271,29 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode>) -> Resu
             return Err(MemoryError(last_node.id));
         }
     };
-    let debug_step3 = start.elapsed().as_nanos(); // debug read times
+    // let debug_step3 = start.elapsed().as_nanos(); // debug read times
     
-    log::debug!("write_size: {}B, step 1: {} step2: {}, step3: {}", 
-        size_of::<ObjectMemoryEntry<T>>(), 
-        debug_step1, 
-        debug_step2-debug_step1, 
-        debug_step3 - debug_step2);
+    // log::debug!("write_size: {}B, step 1: {} step2: {}, step3: {}", 
+    //     size_of::<ObjectMemoryEntry<T>>(), 
+    //     debug_step1, 
+    //     debug_step2-debug_step1, 
+    //     debug_step3 - debug_step2);
 
 
     Ok([first, last])
+}
+
+pub fn mem_readone<T: Copy>(offset: usize, mem_node: &MemoryNode<T>) -> Result<ObjectMemoryEntry<T>, MemoryError> {
+    let addr = mem_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    match safe_read(addr) {
+        Ok(data) => Ok(data),
+        Err(e) => {
+            error!(
+                "Safe read failed. Node {}, offset {}: {}",
+                mem_node.id, offset, e
+            );
+            Err(MemoryError(mem_node.id))
+        }
+    }
 }
 

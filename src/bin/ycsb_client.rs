@@ -11,6 +11,24 @@ use clap::{Arg, value_parser};
 use log::{debug, info, error};
 use std::time::Duration;
 
+/// primitive way to parse usize at compile time (required by repcxl)
+/// @TODO: untie repCXL from generic object type and remove this hack
+const fn parse_usize(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut result = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        result = result * 10 + (bytes[i] - b'0') as usize;
+        i += 1;
+    }
+    result
+}
+
+const OBJECT_SIZE: usize = match option_env!("OBJECT_SIZE") {
+    Some(s) => parse_usize(s),
+    None => 64,
+};
+
 /// Convert Vec<u8> to fixed-size array, truncating or padding with zeros as needed
 fn vec_to_array<const N: usize>(vec: &Vec<u8>) -> [u8; N] {
     let mut arr = [0u8; N];
@@ -41,12 +59,18 @@ fn main() {
             .required(true)
             .index(2)
             .value_parser(value_parser!(String)),
+        Arg::new("coordinator_delay")
+            .long("coordinator_delay")
+            .help("Delay for the coordinator in seconds before ending the benchmark")
+            .required(true)
+            .value_parser(value_parser!(u64)),
     ]);
     
     let extra_args = ap.parse();
     
     let load_trace = extra_args.get_one::<String>("load_trace").unwrap();
     let run_trace = extra_args.get_one::<String>("run_trace").unwrap();
+    let coordinator_delay = extra_args.get_one::<u64>("coordinator_delay").unwrap();
 
     let mut workload = load_ycsb_workload(load_trace, run_trace);
     // workload.summary();
@@ -60,7 +84,7 @@ fn main() {
     }
 
     // Initialize RepCXL client and local index
-    let mut rcxl = RepCXL::<[u8; 64]>::new(ap.config);
+    let mut rcxl = RepCXL::<[u8; OBJECT_SIZE]>::new(ap.config);
     let mut index = std::collections::HashMap::new();
 
     // LOAD PHASE: populate index and memory nodes
@@ -74,7 +98,7 @@ fn main() {
                 rep_cxl::utils::ycsb::OpType::Insert => {
                     
                     // truncate/pad to fixed-size
-                    let value: [u8; 64] = vec_to_array(&op.fields[0].1);
+                    let value: [u8; OBJECT_SIZE] = vec_to_array(&op.fields[0].1);
 
                     if let Some(obj) = rcxl.new_object_with_val(oid, value) {
                         index.insert(op.key, obj);
@@ -131,6 +155,7 @@ fn main() {
 
     // metrics
     let mut read_latencies = Vec::new();
+    let mut dirty_read_latencies = Vec::new();
     let mut read_errors = 0;
     let mut write_latencies = Vec::new();
     let mut write_errors = 0;
@@ -163,7 +188,11 @@ fn main() {
                 match rcxl.read_object(obj) {
                     Ok(rr) => {
                         match rr {
-                            ReadReturn::ReadDirty(_) => dirty_reads += 1,
+                            ReadReturn::ReadDirty(_) => {
+                                dirty_reads += 1;
+                                dirty_read_latencies.push(start.elapsed());
+                                // rcxl.write_object(obj, rdp.data).expect("Failed to write back dirty read value");
+                            }
                             ReadReturn::ReadSafe(_) => safe_reads += 1,
                         }
                         read_latencies.push(start.elapsed());
@@ -175,7 +204,7 @@ fn main() {
                 }
             },
             rep_cxl::utils::ycsb::OpType::Update => {
-                let value: [u8; 64] = vec_to_array(&op.fields[0].1);
+                let value: [u8; OBJECT_SIZE] = vec_to_array(&op.fields[0].1);
 
                 if let Some(obj) = index.get(&op.key) {
                     let start = std::time::Instant::now();
@@ -196,6 +225,13 @@ fn main() {
     }    
     let total_elapsed = start_total.elapsed();
 
+    // wee hack: the coordinator spins the leader logger thread which logs 
+    // dirty read operations. If the coordinator exists so deas the logger and
+    // some processes might be left hanging. Hence we wait a bit with @TODO
+    // find a cleaner solution
+    if rcxl.is_coordinator() {
+        std::thread::sleep(Duration::from_secs(coordinator_delay.clone())); // wait for replicas to finish
+    }
     rcxl.stop();
     std::thread::sleep(Duration::from_millis(1)); // improves stdout
 
@@ -211,6 +247,10 @@ fn main() {
     println!("  Write errors: {}", write_errors);
     println!("  Safe reads: {}", safe_reads);
     println!("  Dirty reads: {}", dirty_reads);
+    if dirty_reads > 0 {
+        let avg_dr_ns = dirty_read_latencies.iter().sum::<Duration>().as_nanos() as u64 / dirty_read_latencies.len() as u64;
+        println!("  Dirty read avg latency: {}", utils::fmt_ns(avg_dr_ns));
+    }
     if !read_latencies.is_empty() {
         println!("  Read latencies");
         utils::print_latency_stats(&read_latencies);

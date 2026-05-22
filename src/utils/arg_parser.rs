@@ -104,6 +104,19 @@ impl ArgParser {
                     .long("core-affinity")
                     .help("CPU core to pin the repCXL write thread to")
                     .value_parser(value_parser!(usize)),
+            )
+            .arg(
+                Arg::new("logger_node")
+                    .short('l')
+                    .long("log-node")
+                    .help("Path used for log node output")
+                    .value_parser(value_parser!(String)),
+            )
+            .arg(
+                Arg::new("logger_cluster_size")
+                    .long("logger-cluster-size")
+                    .help("Size of the logger cluster (positive odd integer)")
+                    .value_parser(value_parser!(usize)),
             );
 
 
@@ -147,8 +160,15 @@ impl ArgParser {
         if let Some(read_retries) = matches.remove_one::<usize>("read_retries") {
             self.config.read_retries = read_retries;
         }
-        if let Some(core_affinity) = matches.remove_one::<usize>("core_affinity") {
-            self.config.core_affinity = Some(core_affinity);
+        // core affinity can be only specified in the config file
+        // if let Some(core_affinity) = matches.remove_one::<usize>("core_affinity") {
+        //     self.config.core_affinity = core_affinity;
+        // }
+        if let Some(logger_node) = matches.remove_one::<String>("logger_node") {
+            self.config.logger_node = logger_node;
+        }
+        if let Some(logger_cluster_size) = matches.remove_one::<usize>("logger_cluster_size") {
+            self.config.logger_cluster_size = logger_cluster_size;
         }
 
         // validate config values

@@ -1,6 +1,6 @@
 ---
 - name: Provision QEMU CXL VM
-  hosts: vms
+  hosts: servers
   tasks:
     
     - name: Install utils

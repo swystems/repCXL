@@ -66,6 +66,7 @@ Create a new device with 4G memory
 
 If an existing device fills all the available memory already, resize
 
+    daxctl disable-device -u dax0.0
     daxctl reconfigure-device -s <new_size> -u /dev/dax<number>
 
 

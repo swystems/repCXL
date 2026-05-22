@@ -1,22 +1,34 @@
 use std::fs::File;
 use rep_cxl::RepCXL;
 use rep_cxl::RepCXLConfig;
+use std::fs::{OpenOptions, metadata};
 
 pub const TEST_MEMORY_SIZE: usize = 2 * 1024 * 1024; // 1 MiB
-pub const TEST_CHUNK_SIZE: usize = 64;
 pub const TEST_ALGORITHM: &str = "monster";
 pub const TEST_ROUND_TIME: u64 = 10_000_000; // 10 ms
 
 pub fn test_config(node_paths: Vec<&'static str>) -> RepCXLConfig {
+    let logger_node = "/tmp/repcxl_test.log";
+
+
+    if let Ok(_) = metadata(logger_node) {
+        // exists — open without truncating
+        let _f = OpenOptions::new().read(true).write(true).open(logger_node).unwrap();
+    } else {
+        // doesn't exist — create and set length
+        let f = OpenOptions::new().read(true).write(true).create_new(true).open(logger_node).unwrap();
+        f.set_len(TEST_MEMORY_SIZE as u64).expect("Failed to set file size");
+    }
+    
     RepCXLConfig {
         id: 0,
         mem_nodes: node_paths.into_iter().map(|s| s.to_string()).collect(),
         mem_size: TEST_MEMORY_SIZE,
-        chunk_size: TEST_CHUNK_SIZE,
         processes: vec![], 
         algorithm: TEST_ALGORITHM.to_string(),
         round_time: TEST_ROUND_TIME,
         pipeline: false, // no threads
+        logger_node: logger_node.to_string(),
         ..Default::default()
     }
 }
@@ -37,20 +49,6 @@ pub fn single_rcxl(id: usize, node_paths: Vec<&'static str>) -> RepCXL<u64> {
     config.processes = vec![id as u32];
     RepCXL::<u64>::new(config)
 }
-
-// pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {
-//     let mut processes = Vec::new();
-//     for i in 0..num {
-//         let mut rcxl = single_rcxl(i, node_paths.clone());
-//         if i == 0 {
-//             rcxl.init_state(); // coordinator inits state
-//         }
-//         processes.push(rcxl);
-
-        
-//     }
-//     processes
-// }
 
 
 pub fn multi_rcxl(num: usize, node_paths: Vec<&'static str>) -> Vec<RepCXL<u64>> {

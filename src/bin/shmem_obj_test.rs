@@ -35,6 +35,8 @@ fn main() {
 
     let mut rcxl = RepCXL::new(ap.config);
 
+    rcxl.config.pipeline = false;
+
     match matches.get_one::<String>("role").map(|s| s.as_str()) {
         Some("c") | Some("coordinator") => {
 
@@ -45,10 +47,7 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(10)); // wait for protocol to start
 
             let obj100 = rcxl.new_object(100).expect("failed to create object");
-            obj100.write(msg).expect("failed to write to object");
-            // obj100.write(*b"repcxl nocach1").expect("failed to write to object");
-            // obj100.write(*b"repcxl nocach2").expect("failed to write to object");
-            // obj100.write(*b"repcxl nocach3").expect("failed to write to object");
+            rcxl.write_object(&obj100, msg).expect("failed to write to object");
         },
         Some("r") | Some("replica") => {
             rcxl.start(); // start protocol threads
@@ -69,6 +68,7 @@ fn main() {
         },
         _ => println!("Usage: shmem_obj_test <role>\nrole: 'c'/'coordinator' or 'r'/'replica'"),
     }
-    
+
+    rcxl.info();
     rcxl.stop(); // stop protocol threads
 }
