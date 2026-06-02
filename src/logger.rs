@@ -88,6 +88,7 @@ impl LoggerSharedState {
 
 /// Logger shared-memory interface stored in a CXL DAX-mapped memory region.
 pub struct LoggerInterface {
+    num_of_repcxl_processes: usize,
     cluster_size: usize,
     shmem: *mut LoggerSharedState,
 }
@@ -111,6 +112,7 @@ impl LoggerInterface {
         // logger id = repcxl id, inherited from the repcxl instance that creates
         // the logger 
         LoggerInterface {
+            num_of_repcxl_processes: config.processes.len(),
             cluster_size: config.logger_cluster_size,
             shmem: ptr,
         }
@@ -176,6 +178,7 @@ impl LoggerInterface {
                 std::mem::size_of::<usize>()
             );
             // update
+            // shmem.lrq_index = (shmem.lrq_index + 1) % self.num_of_repcxl_processes;
             shmem.lrq_index = (shmem.lrq_index + 1) % MAX_PROCESSES;
             // push updated index to memory
             safe_memio::cache_flush_write(

@@ -109,7 +109,7 @@ pub fn monster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
     // open log file if logging is enabled
     let mut mslog = None;
-    if let Some(log_path) = actx.logger.as_ref() {   
+    if let Some(log_path) = actx.monster_logger.as_ref() {   
         let mut l = ms_logger::MonsterStateLogger::new(log_path);
         l.clear();
         mslog = Some(l);
@@ -306,7 +306,7 @@ pub fn fmonster_write<T: Copy + PartialEq + std::fmt::Debug>(
 
     // open log file if logging is enabled
     let mut mslog = None;
-    if let Some(log_path) = actx.logger.as_ref() {
+    if let Some(log_path) = actx.monster_logger.as_ref() {
         let mut l = ms_logger::MonsterStateLogger::new(log_path);
         l.clear();
         mslog = Some(l);
