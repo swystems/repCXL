@@ -6,10 +6,11 @@ set -e
 REPCXL_ID=$1
 WORKLOAD=$2
 CONFIG=$3
+DELAY=$4
 
 
-if [ -z "$REPCXL_ID" ]; then
-    echo "Usage: $0 <repcxl_id> <workload> <config>"
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <repcxl_id> <workload> <config> <delay>"
     exit 1
 fi
 
@@ -23,4 +24,5 @@ target/release/ycsb_client \
     ycsb/traces/${WORKLOAD}_load.dat \
     ycsb/traces/${WORKLOAD}_run.dat \
     --config ${CONFIG} \
-    --id ${REPCXL_ID}
+    --id ${REPCXL_ID} \
+    --coordinator_delay "$DELAY" 

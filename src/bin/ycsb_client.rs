@@ -4,7 +4,7 @@
 use core::panic;
 use rep_cxl::utils::ycsb::load_ycsb_workload;
 use rep_cxl::utils::arg_parser::ArgParser;
-use rep_cxl::{RepCXL};
+use rep_cxl::{RepCXL, logger};
 use rep_cxl::request::ReadReturn;
 use rep_cxl::utils;
 use clap::{Arg, value_parser};
@@ -71,6 +71,9 @@ fn main() {
     let load_trace = extra_args.get_one::<String>("load_trace").unwrap();
     let run_trace = extra_args.get_one::<String>("run_trace").unwrap();
     let coordinator_delay = extra_args.get_one::<u64>("coordinator_delay").unwrap();
+
+    let pid = ap.config.id.clone() as usize;
+    let logger_cluster_size = ap.config.logger_cluster_size.clone();
 
     let mut workload = load_ycsb_workload(load_trace, run_trace);
     // workload.summary();
@@ -225,11 +228,13 @@ fn main() {
     }    
     let total_elapsed = start_total.elapsed();
 
-    // wee hack: the coordinator spins the leader logger thread which logs 
-    // dirty read operations. If the coordinator exists so deas the logger and
-    // some processes might be left hanging. Hence we wait a bit with @TODO
+    // wee hack: logger threads which run consensus to log dirty read operations 
+    // are internally spinned by the first 0..logger_cluster_size repCXL processes.
+    // Example with 3: repCXL p0 starts logger0, p1 starts logger1, p2 starts logger2. 
+    // If a majority of these finish, so do the loggers and some other processes 
+    // still running might be left hanging. Hence logger vwe wait a bit with @TODO
     // find a cleaner solution
-    if rcxl.is_coordinator() {
+    if (pid < logger_cluster_size) {
         std::thread::sleep(Duration::from_secs(coordinator_delay.clone())); // wait for replicas to finish
     }
     rcxl.stop();

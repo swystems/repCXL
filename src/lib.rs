@@ -514,7 +514,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                     self.view.self_id, 
                     self.config.logger_cluster_size);
                 
-                logger::run::<T>(
+                logger::run_raft::<T>(
                     self.config.id as usize,
                     self.config.clone(),
                     Arc::clone(&self.stop_flag));

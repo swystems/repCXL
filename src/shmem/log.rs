@@ -51,4 +51,24 @@ impl<T: Copy> Log<T> {
             );
         }
     }
+
+    pub(crate) fn write(&mut self, index: usize, wid: Wid, obj_info: ObjectInfo, data: T) {
+        let update = LogEntry::new(LogQueueEntry::new(wid, obj_info), data);
+        let log_entry = &mut self.entries[index % LOG_SIZE];
+        *log_entry = Some(update);
+        // self.size += 1;
+
+        // flush to mem!
+        unsafe {
+            safe_memio::cache_flush_write(
+                log_entry as *const Option<LogEntry<T>> as *const u8, 
+                std::mem::size_of::<Option<LogEntry<T>>>()
+            );
+
+            safe_memio::cache_flush_write(
+                &self.size as *const usize as *const u8, 
+                std::mem::size_of::<usize>()
+            );
+        }
+    }
 }
