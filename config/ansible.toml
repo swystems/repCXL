@@ -53,13 +53,13 @@ startup_delay = 1000000000
 round_time = 1500 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "lock"
+algorithm = "async_best_effort"
 
 # Enable pipelined write path (true/false)
 pipeline = false
 
 # Number of times to retry a read operation if it returns a dirty read
-read_retries = 10
+read_retries = 1
 
 # List of CPU cores. Can be specified as:
 #   - A number (4) → generates [0, 1, 2, 3]
