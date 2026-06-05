@@ -1,0 +1,10 @@
+./04clients: 171 kops/s
+./08clients: 156.875 kops/s
+./12clients: 138.75 kops/s
+./20clients: 92.45 kops/s
+./28clients: 61.4286 kops/s
+./36clients: 46.1111 kops/s
+./44clients: 37.2727 kops/s
+./48clients: 34.0625 kops/s
+./56clients: 28.8571 kops/s
+./64clients: 24.8438 kops/s
