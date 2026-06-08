@@ -4,7 +4,7 @@
 use core::panic;
 use rep_cxl::utils::ycsb::load_ycsb_workload;
 use rep_cxl::utils::arg_parser::ArgParser;
-use rep_cxl::{RepCXL, logger};
+use rep_cxl::{RepCXL};
 use rep_cxl::request::ReadReturn;
 use rep_cxl::utils;
 use clap::{Arg, value_parser};
@@ -234,7 +234,7 @@ fn main() {
     // If a majority of these finish, so do the loggers and some other processes 
     // still running might be left hanging. Hence logger vwe wait a bit with @TODO
     // find a cleaner solution
-    if (pid < logger_cluster_size) {
+    if pid < logger_cluster_size {
         std::thread::sleep(Duration::from_secs(coordinator_delay.clone())); // wait for replicas to finish
     }
     rcxl.stop();
