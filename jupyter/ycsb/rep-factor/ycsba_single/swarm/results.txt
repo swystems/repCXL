@@ -1,0 +1,8 @@
+./14nodes: 59.625 kops/s
+./14nodes: 14471.8 ns
+./21nodes: 48.75 kops/s
+./21nodes: 17856.7 ns
+./3nodes: 101.75 kops/s
+./3nodes: 8259.69 ns
+./7nodes: 82.75 kops/s
+./7nodes: 10221.6 ns
