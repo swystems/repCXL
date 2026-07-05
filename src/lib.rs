@@ -199,7 +199,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
             start_instant: Instant::now(), // will be updated at sync_start
             round_time: Duration::from_nanos(config.round_time),
             read_offset: config.read_offset,
-            logger: None, // will be set if file logging is enabled
+            monster_logger: None, // will be set if file logging is enabled
             stats: algorithms::monster::MonsterStats::new(),
         };
 
@@ -222,7 +222,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
     pub fn enable_monster_statelog(&mut self, path: &str) {
         let mut log = utils::ms_logger::MonsterStateLogger::new(path);
         log.clear();
-        self.algorithm_ctx.logger = Some(path.to_string());
+        self.algorithm_ctx.monster_logger = Some(path.to_string());
     }
 
     pub fn register_process(&mut self, pid: u32) {
@@ -532,7 +532,7 @@ impl<T: Send + Copy + PartialEq + std::fmt::Debug + 'static> RepCXL<T> {
                 round_time: Duration::from_nanos(self.config.round_time),
                 read_offset: self.config.read_offset,
                 stop_flag: self.stop_flag.clone(),
-                logger: self.algorithm_ctx.logger.clone(),
+                monster_logger: self.algorithm_ctx.monster_logger.clone(),
             };
 
             let ractx = wactx.clone();

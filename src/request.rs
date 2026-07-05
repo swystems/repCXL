@@ -93,6 +93,15 @@ impl Hash for Wid {
     }
 }
 
+impl Default for Wid {
+    fn default() -> Self {
+        Wid {
+            round_num: 0,
+            process_id: 0,
+        }
+    }
+}
+
 impl Wid {
     pub fn new(round_num: u64, process_id: usize) -> Self {
         Wid {

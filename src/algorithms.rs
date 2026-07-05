@@ -8,6 +8,7 @@ use crate::request::{WriteRequest,ReadRequest,ReadReturn};
 pub mod best_effort;
 pub mod monster;
 pub mod lock;
+pub mod logger_only;
 
 #[derive(Clone)]
 pub(crate) struct AlgorithmThreadContext<T> {
@@ -16,7 +17,7 @@ pub(crate) struct AlgorithmThreadContext<T> {
     pub round_time: Duration,
     pub read_offset: Option<f64>,
     pub stop_flag: Arc<AtomicBool>,
-    pub logger: Option<String>,
+    pub monster_logger: Option<String>,
 }
 
 
@@ -27,7 +28,7 @@ impl<T> AlgorithmThreadContext<T> {
             start_instant: self.start_instant,
             round_time: self.round_time,
             read_offset: self.read_offset,
-            logger: self.logger.clone(),
+            monster_logger: self.monster_logger.clone(),
             stats: stats,
         }
     }
@@ -38,7 +39,7 @@ pub(crate) struct AlgorithmCallContext {
     pub start_instant: Instant,
     pub round_time: Duration,
     pub read_offset: Option<f64>,
-    pub logger: Option<String>,
+    pub monster_logger: Option<String>,
     pub stats: monster::MonsterStats,
 }
 
@@ -48,6 +49,7 @@ pub fn requires_logger(algorithm: &String) -> bool {
         "async_best_effort" => true,
         "monster" | "fmonster" => true,
         "lock" => false,
+        "logger_only" => true,
         _ => panic!("Unknown algorithm, check config: {}", algorithm),
     }
 }
@@ -88,6 +90,7 @@ pub fn read<T: Copy + PartialEq + std::fmt::Debug>(
         "async_best_effort" => best_effort::async_best_effort_read(&view, &obj.info),
         "monster" | "fmonster" => monster::monster_read(actx, view, &obj.info),
         "lock" => lock::lock_read(view, &obj),
+        "logger_only" => logger_only::logger_only_read(view, &obj),
         _ => panic!("Unknown read algorithm, check config: {}", actx.algorithm),
     }
 }
@@ -103,6 +106,7 @@ pub fn write<T: Copy + PartialEq + std::fmt::Debug>(
         "monster"  => monster::monster_write(actx, view, &obj.info, data),
         "fmonster" => monster::fmonster_write(actx, view, &obj.info, data),
         "lock" => lock::lock_write(view, &obj, data),
+        "logger_only" => logger_only::logger_only_write(view, &obj.info, data),
         _ => Err(format!("write not supported for algorithm '{}'", actx.algorithm)),
     }
 }
