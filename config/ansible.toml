@@ -53,7 +53,7 @@ startup_delay = 1000000000
 round_time = 1500 
 
 # Replication algorithm: "monster", "sync_best_effort", "async_best_effort"
-algorithm = "fmonster"
+algorithm = "async_best_effort"
 
 # Enable pipelined write path (true/false)
 pipeline = false

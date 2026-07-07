@@ -9,6 +9,7 @@ target/
 bpsleep
 .env
 *.out
+ras_monitor
 
 # jupyter
 .ipynb_checkpoints

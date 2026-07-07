@@ -231,9 +231,11 @@ pub fn mem_readall<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Re
 pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> Result<[ObjectMemoryEntry<T>; 2], MemoryError> {
     
     let first_node = &mem_nodes[0];
+    let mid_node = &mem_nodes[mem_nodes.len() / 2];
     let last_node = &mem_nodes[mem_nodes.len() - 1];
 
     // flush nodes
+    // for node in [first_node, mid_node, last_node] {
     for node in [first_node, last_node] {
         let addr = node.addr_at(offset);
         unsafe { clflushopt_range(addr, size_of::<ObjectMemoryEntry<T>>()); }
@@ -241,11 +243,9 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> R
     // wait for flush to complete before reading
     unsafe { _mm_lfence(); }
 
-    // let start = std::time::Instant::now(); // debug read times
 
     // now read both from memory    
     let mut addr = first_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
-    // let debug_step1 = start.elapsed().as_nanos(); // debug read times
     let first = match safe_read(addr) {
         Ok(data) => data,
         Err(e) => {
@@ -257,7 +257,6 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> R
         }
     };
 
-    // let debug_step2 = start.elapsed().as_nanos(); // debug read times
     
     // read the last node
     addr = last_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
@@ -271,14 +270,17 @@ pub fn mem_readends<T: Copy>(offset: usize, mem_nodes: &Vec<MemoryNode<T>>) -> R
             return Err(MemoryError(last_node.id));
         }
     };
-    // let debug_step3 = start.elapsed().as_nanos(); // debug read times
     
-    // log::debug!("write_size: {}B, step 1: {} step2: {}, step3: {}", 
-    //     size_of::<ObjectMemoryEntry<T>>(), 
-    //     debug_step1, 
-    //     debug_step2-debug_step1, 
-    //     debug_step3 - debug_step2);
 
+    // read the middle node for added delay in log operation
+    addr = mid_node.addr_at(offset) as *mut ObjectMemoryEntry<T>;
+    if let Err(e) = safe_read(addr) {
+        error!(
+            "Safe read failed. Node {}, offset {}: {}",
+            mid_node.id, offset, e
+        );
+        return Err(MemoryError(mid_node.id));
+    }
 
     Ok([first, last])
 }
